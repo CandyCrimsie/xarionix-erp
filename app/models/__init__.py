@@ -5,7 +5,15 @@ from models import (
     entrances,
     equipment,
     locations,
-    users
+    users,
+    company,
+    organizational_units,
+    company_memberships,
+    unit_memberships,
+    permissions,
+    roles,
+    role_permissions,
+    membership_roles
 )
 
 __all__ = [
@@ -15,5 +23,13 @@ __all__ = [
     "entrances",
     "equipment",
     "locations",
-    "users"
+    "users",
+    "company",
+    "organizational_units",
+    "company_memberships",
+    "unit_memberships",
+    "permissions",
+    "roles",
+    "role_permissions",
+    "membership_roles"
 ]

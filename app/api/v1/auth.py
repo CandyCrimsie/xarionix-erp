@@ -44,7 +44,10 @@ from core.security.jwt import create_access_token
 from core.security.cookies import set_refresh_cookie, delete_refresh_cookie
 
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/auth",
+    tags=["Auth"]
+)
 
 
 class InvalidRefreshTokenError(Exception):
