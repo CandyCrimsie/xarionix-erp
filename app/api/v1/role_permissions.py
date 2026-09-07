@@ -25,6 +25,7 @@ from schemas.role_permissions import (
 )
 
 from services.role_permissions import (
+    InvalidPermissionScopesError,
     InvalidPermissionsError,
     RoleNotFoundError,
     list_role_permissions,
@@ -117,5 +118,18 @@ async def update_role_permissions_endpoint(
             detail={
                 "message": "Invalid permissions",
                 "permission_ids": exc.permission_ids,
+            },
+        )
+
+    except InvalidPermissionScopesError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": (
+                    "Invalid permission scopes"
+                ),
+                "invalid_scopes": (
+                    exc.invalid_scopes
+                ),
             },
         )

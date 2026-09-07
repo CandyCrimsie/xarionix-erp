@@ -23,6 +23,10 @@ from schemas.role_permissions import (
     RolePermissionResponse,
 )
 
+from core.permissions.codes import (
+    get_permission_definition,
+)
+
 
 class RoleNotFoundError(Exception):
     pass
@@ -37,6 +41,18 @@ class InvalidPermissionsError(Exception):
 
         super().__init__(
             "Invalid permission IDs"
+        )
+
+
+class InvalidPermissionScopesError(Exception):
+    def __init__(
+        self,
+        invalid_scopes: list[dict],
+    ) -> None:
+        self.invalid_scopes = invalid_scopes
+
+        super().__init__(
+            "Invalid permission scopes"
         )
 
 
@@ -131,6 +147,49 @@ async def replace_role_permissions(
     if invalid_ids:
         raise InvalidPermissionsError(
             invalid_ids
+        )
+
+    invalid_scopes: list[dict] = []
+
+    for item in permissions:
+        permission = permissions_by_id[
+            item.permission_id
+        ]
+
+        definition = get_permission_definition(
+            permission.code
+        )
+
+        if (
+            definition is None
+            or item.scope
+            not in definition.allowed_scopes
+        ):
+            invalid_scopes.append(
+                {
+                    "permission_id": (
+                        item.permission_id
+                    ),
+                    "code": permission.code,
+                    "scope": item.scope.value,
+                    "allowed_scopes": (
+                        [
+                            scope.value
+                            for scope
+                            in (
+                                definition.allowed_scopes
+                                if definition
+                                is not None
+                                else ()
+                            )
+                        ]
+                    ),
+                }
+            )
+
+    if invalid_scopes:
+        raise InvalidPermissionScopesError(
+            invalid_scopes
         )
 
     role_permissions = [

@@ -1,23 +1,60 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.permissions.codes import (
-    PERMISSION_DEFINITIONS,
-)
-from models.permissions import Permission
 from repositories.permissions import (
     create_permission,
     get_all_permissions,
     get_permissions,
 )
 
+from core.permissions.codes import (
+    PERMISSION_DEFINITIONS,
+    get_permission_definition,
+)
+
+from schemas.permissions import (
+    PermissionResponse,
+)
+
 
 async def list_permissions(
     session: AsyncSession,
-) -> list[Permission]:
-    return await get_permissions(
+) -> list[PermissionResponse]:
+    permissions = await get_permissions(
         session,
         active_only=True,
     )
+
+    result: list[
+        PermissionResponse
+    ] = []
+
+    for permission in permissions:
+        definition = (
+            get_permission_definition(
+                permission.code
+            )
+        )
+
+        if definition is None:
+            continue
+
+        result.append(
+            PermissionResponse(
+                id=permission.id,
+                code=permission.code,
+                name=permission.name,
+                module=permission.module,
+                description=(
+                    permission.description
+                ),
+                is_active=permission.is_active,
+                allowed_scopes=list(
+                    definition.allowed_scopes
+                ),
+            )
+        )
+
+    return result
 
 
 async def sync_permissions(

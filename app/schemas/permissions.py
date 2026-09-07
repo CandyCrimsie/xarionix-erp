@@ -3,6 +3,10 @@ from pydantic import (
     ConfigDict,
 )
 
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
 
 class PermissionResponse(BaseModel):
     model_config = ConfigDict(
@@ -18,3 +22,7 @@ class PermissionResponse(BaseModel):
     description: str | None
 
     is_active: bool
+
+    allowed_scopes: list[
+        PermissionScope
+    ]
