@@ -183,7 +183,10 @@ async def get_membership_unit_endpoint(
             unit_membership_id=unit_membership_id,
         )
 
-    except UnitMembershipNotFoundError:
+    except (
+        CompanyMembershipNotFoundError,
+        UnitMembershipNotFoundError,
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Unit membership not found",
@@ -224,7 +227,10 @@ async def update_membership_unit_endpoint(
             is_active=data.is_active,
         )
 
-    except UnitMembershipNotFoundError:
+    except (
+        CompanyMembershipNotFoundError,
+        UnitMembershipNotFoundError,
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Unit membership not found",

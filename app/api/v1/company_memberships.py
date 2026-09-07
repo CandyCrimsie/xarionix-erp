@@ -72,6 +72,11 @@ async def get_company_members_endpoint(
         ),
     ],
 ) -> list[CompanyMembershipResponse]:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
     try:
         return await list_company_memberships(
             session,
@@ -108,6 +113,11 @@ async def get_company_member_endpoint(
         ),
     ],
 ) -> CompanyMembershipResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
     try:
         return await get_company_membership(
             session,
@@ -146,6 +156,11 @@ async def add_company_member_endpoint(
         ),
     ],
 ) -> CompanyMembershipResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
     try:
         return await add_user_to_company(
             session,
@@ -196,6 +211,11 @@ async def update_company_member_endpoint(
         ),
     ],
 ) -> CompanyMembershipResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
     try:
         return await update_company_membership(
             session,

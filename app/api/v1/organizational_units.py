@@ -75,6 +75,11 @@ async def get_units_endpoint(
         ),
     ],
 ) -> list[OrganizationalUnitResponse]:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+    
     try:
         return await list_organizational_units(
             session,
@@ -111,6 +116,11 @@ async def get_unit_endpoint(
         ),
     ],
 ) -> OrganizationalUnitResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+    
     try:
         return await get_organizational_unit(
             session,
@@ -139,11 +149,21 @@ async def create_unit_endpoint(
         Depends(get_session),
     ],
 
-    require_permission(
-        PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
-        minimum_scope=PermissionScope.COMPANY,
-    ),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
+    ],
 ) -> OrganizationalUnitResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
     try:
         return await create_new_organizational_unit(
             session,
@@ -187,11 +207,21 @@ async def update_unit_endpoint(
         Depends(get_session),
     ],
 
-    require_permission(
-        PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
-        minimum_scope=PermissionScope.COMPANY,
-    )
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
+    ],
 ) -> OrganizationalUnitResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+    
     try:
         return await update_organizational_unit(
             session,

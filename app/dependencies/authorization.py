@@ -8,8 +8,11 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.permissions.codes import (
+    PermissionCode,
+)
+
+from core.permissions.scopes import (
     PermissionScope,
-    PermissionCode
 )
 
 from dependencies.company import (

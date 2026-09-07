@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -6,21 +8,30 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.users import User
+from core.permissions.codes import (
+    PermissionCode,
+)
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
+from dependencies.authorization import (
+    require_permission,
+)
+from dependencies.company import (
+    CurrentCompanyContext,
+    ensure_company_matches_context,
+)
 from dependencies.database import get_session
+
 from schemas.company import (
-    CompanyCreate,
     CompanyResponse,
     CompanyUpdate,
 )
-from dependencies.auth import get_current_user
+
 from services.company import (
     CompanyNotFoundError,
-    CompanyParentCycleError,
-    ParentCompanyNotFoundError,
-    create_new_company,
     get_company,
-    list_companies,
     update_company,
 )
 
@@ -37,13 +48,27 @@ router = APIRouter(
 )
 async def get_company_endpoint(
     company_id: int,
-    session: AsyncSession = Depends(
-        get_session,
-    ),
-    _: User = Depends(
-        get_current_user,
-    ),
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.COMPANIES_READ,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
 ) -> CompanyResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
     try:
         return await get_company(
             session,
@@ -64,13 +89,44 @@ async def get_company_endpoint(
 async def update_company_endpoint(
     company_id: int,
     data: CompanyUpdate,
-    session: AsyncSession = Depends(
-        get_session,
-    ),
-    _: User = Depends(
-        get_current_user,
-    ),
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.COMPANIES_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
 ) -> CompanyResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
+    restricted_fields = {
+        "parent_id",
+        "is_active",
+    }
+
+    if (
+        restricted_fields
+        & data.model_fields_set
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "parent_id and is_active cannot "
+                "be changed through this endpoint"
+            ),
+        )
+
     try:
         return await update_company(
             session,
@@ -82,16 +138,4 @@ async def update_company_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found",
-        )
-
-    except ParentCompanyNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Parent company not found",
-        )
-
-    except CompanyParentCycleError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Company hierarchy cycle detected",
         )
