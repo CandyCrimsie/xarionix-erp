@@ -97,7 +97,7 @@ PERMISSION_DEFINITIONS = (
         code=PermissionCode.MEMBERS_MANAGE,
         name="Управление сотрудниками компании",
         module="members",
-        allowed_scopes=ALL_RESOURCE_SCOPES,
+        allowed_scopes=UNIT_SCOPES,
     ),
 
     PermissionDefinition(
