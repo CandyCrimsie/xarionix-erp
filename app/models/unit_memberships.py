@@ -3,10 +3,13 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -24,6 +27,23 @@ class UnitMembership(Base):
             "company_membership_id",
             "unit_id",
             name="uq_unit_memberships_membership_unit",
+        ),
+
+        Index(
+            "uq_unit_memberships_primary_per_membership",
+            "company_membership_id",
+            unique=True,
+            postgresql_where=text(
+                "is_primary IS TRUE"
+            ),
+        ),
+
+        CheckConstraint(
+            "NOT is_primary OR is_active",
+            name=(
+                "ck_unit_memberships_"
+                "primary_requires_active"
+            ),
         ),
     )
 

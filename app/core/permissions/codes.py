@@ -116,7 +116,7 @@ PERMISSION_DEFINITIONS = (
         code=PermissionCode.ROLES_ASSIGN,
         name="Назначение ролей сотрудникам",
         module="roles",
-        allowed_scopes=COMPANY_ONLY_SCOPES,
+        allowed_scopes=UNIT_SCOPES,
     ),
 
     PermissionDefinition(
