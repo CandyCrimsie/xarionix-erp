@@ -49,7 +49,7 @@ async def get_current_company_context(
         Depends(get_session),
     ],
 
-    company_id: Annotated[
+    header_company_id: Annotated[
         int | None,
         Header(
             alias="X-Company-Id",
@@ -57,7 +57,7 @@ async def get_current_company_context(
         ),
     ] = None,
 ) -> CurrentCompanyContext:
-    if company_id is None:
+    if header_company_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="X-Company-Id header is required",
@@ -65,7 +65,7 @@ async def get_current_company_context(
 
     membership = await get_company_membership_by_user(
         session,
-        company_id=company_id,
+        company_id=header_company_id,
         user_id=auth.user.id,
     )
 
@@ -80,7 +80,7 @@ async def get_current_company_context(
 
     company = await get_company_by_id(
         session,
-        company_id,
+        header_company_id,
     )
 
     if (
