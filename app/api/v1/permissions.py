@@ -4,6 +4,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.permissions.codes import PermissionCode
+from core.permissions.scopes import (
+    PermissionScope,
+)
 
 from dependencies.authorization import require_permission
 from dependencies.company import CurrentCompanyContext
@@ -34,6 +37,7 @@ async def get_permissions_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ROLES_READ,
+                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],

@@ -17,8 +17,6 @@ from services.company_memberships import (
     list_available_companies_for_user,
 )
 
-from core.permissions.codes import PermissionCode
-
 from dependencies.company import CurrentCompany
 from services.authorization import AuthorizationService
 

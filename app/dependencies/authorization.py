@@ -7,7 +7,10 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.permissions.codes import PermissionCode
+from core.permissions.codes import (
+    PermissionScope,
+    PermissionCode
+)
 
 from dependencies.company import (
     CurrentCompany,
@@ -22,6 +25,8 @@ from services.authorization import (
 
 def require_permission(
     permission: PermissionCode | str,
+    *,
+    minimum_scope: PermissionScope | None = None,
 ):
     async def dependency(
         context: CurrentCompany,
@@ -41,6 +46,7 @@ def require_permission(
                 context.membership.id
             ),
             permission=permission,
+            minimum_scope=minimum_scope,
         )
 
         if not allowed:

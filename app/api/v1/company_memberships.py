@@ -8,11 +8,6 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dependencies.auth import get_current_user
-from dependencies.database import get_session
-
-from models.users import User
-
 from schemas.company_memberships import (
     CompanyMembershipCreate,
     CompanyMembershipResponse,
@@ -28,6 +23,22 @@ from services.company_memberships import (
     get_company_membership,
     list_company_memberships,
     update_company_membership,
+)
+
+from core.permissions.codes import (
+    PermissionCode,
+)
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
+from dependencies.database import get_session
+from dependencies.authorization import (
+    require_permission,
+)
+from dependencies.company import (
+    CurrentCompanyContext,
+    ensure_company_matches_context,
 )
 
 
@@ -51,9 +62,14 @@ async def get_company_members_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.MEMBERS_READ,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> list[CompanyMembershipResponse]:
     try:
@@ -82,9 +98,14 @@ async def get_company_member_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.MEMBERS_READ,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> CompanyMembershipResponse:
     try:
@@ -115,9 +136,14 @@ async def add_company_member_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.MEMBERS_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> CompanyMembershipResponse:
     try:
@@ -160,9 +186,14 @@ async def update_company_member_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.MEMBERS_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> CompanyMembershipResponse:
     try:

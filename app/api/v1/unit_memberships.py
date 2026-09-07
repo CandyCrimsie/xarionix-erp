@@ -8,11 +8,6 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dependencies.auth import get_current_user
-from dependencies.database import get_session
-
-from models.users import User
-
 from schemas.unit_memberships import (
     UnitMembershipCreate,
     UnitMembershipResponse,
@@ -29,6 +24,23 @@ from services.unit_memberships import (
     get_membership_unit,
     list_membership_units,
     update_membership_unit,
+)
+
+from core.permissions.codes import (
+    PermissionCode,
+)
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
+from dependencies.database import (
+    get_session
+)
+from dependencies.authorization import (
+    require_permission,
+)
+from dependencies.company import (
+    CurrentCompanyContext,
 )
 
 
@@ -52,15 +64,21 @@ async def get_membership_units_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.MEMBERS_READ,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> list[UnitMembershipResponse]:
     try:
         return await list_membership_units(
             session,
-            company_membership_id,
+            company_id=context.company.id,
+            company_membership_id=company_membership_id,
         )
 
     except CompanyMembershipNotFoundError:
@@ -84,14 +102,20 @@ async def add_membership_unit_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.MEMBERS_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> UnitMembershipResponse:
     try:
         return await add_membership_to_unit(
             session,
+            company_id=context.company.id,
             company_membership_id=company_membership_id,
             unit_id=data.unit_id,
             is_primary=data.is_primary,
@@ -141,14 +165,20 @@ async def get_membership_unit_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.MEMBERS_READ,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> UnitMembershipResponse:
     try:
         return await get_membership_unit(
             session,
+            company_id=context.company.id,
             company_membership_id=company_membership_id,
             unit_membership_id=unit_membership_id,
         )
@@ -174,14 +204,20 @@ async def update_membership_unit_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.MEMBERS_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> UnitMembershipResponse:
     try:
         return await update_membership_unit(
             session,
+            company_id=context.company.id,
             company_membership_id=company_membership_id,
             unit_membership_id=unit_membership_id,
             is_primary=data.is_primary,

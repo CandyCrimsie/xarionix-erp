@@ -42,15 +42,15 @@ class UnitMembershipAlreadyExistsError(Exception):
 
 async def list_membership_units(
     session: AsyncSession,
+    *,
+    company_id: int,
     company_membership_id: int,
 ) -> list[UnitMembership]:
-    membership = await get_company_membership_by_id(
+    await _get_company_membership(
         session,
-        company_membership_id,
+        company_id=company_id,
+        company_membership_id=company_membership_id,
     )
-
-    if membership is None:
-        raise CompanyMembershipNotFoundError
 
     return await get_membership_units(
         session,
@@ -61,17 +61,16 @@ async def list_membership_units(
 async def add_membership_to_unit(
     session: AsyncSession,
     *,
+    company_id: int,
     company_membership_id: int,
     unit_id: int,
     is_primary: bool,
 ) -> UnitMembership:
-    company_membership = await get_company_membership_by_id(
+    company_membership = await _get_company_membership(
         session,
-        company_membership_id,
+        company_id=company_id,
+        company_membership_id=company_membership_id,
     )
-
-    if company_membership is None:
-        raise CompanyMembershipNotFoundError
 
     unit = await get_organizational_unit_by_id(
         session,
@@ -121,9 +120,16 @@ async def add_membership_to_unit(
 async def get_membership_unit(
     session: AsyncSession,
     *,
+    company_id: int,
     company_membership_id: int,
     unit_membership_id: int,
 ) -> UnitMembership:
+    await _get_company_membership(
+        session,
+        company_id=company_id,
+        company_membership_id=company_membership_id,
+    )
+
     unit_membership = await get_unit_membership_by_id(
         session,
         unit_membership_id,
@@ -142,6 +148,7 @@ async def get_membership_unit(
 async def update_membership_unit(
     session: AsyncSession,
     *,
+    company_id: int,
     company_membership_id: int,
     unit_membership_id: int,
     is_primary: bool | None,
@@ -149,6 +156,7 @@ async def update_membership_unit(
 ) -> UnitMembership:
     unit_membership = await get_membership_unit(
         session,
+        company_id=company_id,
         company_membership_id=company_membership_id,
         unit_membership_id=unit_membership_id,
     )
@@ -175,3 +183,23 @@ async def update_membership_unit(
     await session.refresh(unit_membership)
 
     return unit_membership
+
+
+async def _get_company_membership(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    company_membership_id: int,
+):
+    membership = await get_company_membership_by_id(
+        session,
+        company_membership_id,
+    )
+
+    if (
+        membership is None
+        or membership.company_id != company_id
+    ):
+        raise CompanyMembershipNotFoundError
+
+    return membership

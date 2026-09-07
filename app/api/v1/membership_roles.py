@@ -9,6 +9,9 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.permissions.codes import PermissionCode
+from core.permissions.scopes import (
+    PermissionScope,
+)
 
 from dependencies.authorization import require_permission
 from dependencies.company import CurrentCompanyContext
@@ -49,6 +52,7 @@ async def get_membership_roles_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_READ,
+                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -85,6 +89,7 @@ async def update_membership_roles_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ROLES_ASSIGN,
+                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],

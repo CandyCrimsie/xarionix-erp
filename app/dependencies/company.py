@@ -104,3 +104,15 @@ CurrentCompany = Annotated[
     CurrentCompanyContext,
     Depends(get_current_company_context),
 ]
+
+
+def ensure_company_matches_context(
+    *,
+    company_id: int,
+    context: CurrentCompanyContext,
+) -> None:
+    if company_id != context.company.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found",
+        )

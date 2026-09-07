@@ -9,22 +9,26 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.permissions.codes import PermissionCode
+from core.permissions.scopes import PermissionScope
 
-from dependencies.authorization import require_permission
-from dependencies.company import CurrentCompanyContext
+from dependencies.authorization import (
+    require_permission,
+)
+from dependencies.company import (
+    CurrentCompanyContext,
+)
 from dependencies.database import get_session
-
-from schemas.permissions import (
-    PermissionResponse,
-)
-
-from schemas.role_permissions import (
-    RolePermissionsUpdate,
-)
 
 from schemas.role_permissions import (
     RolePermissionResponse,
     RolePermissionsUpdate,
+)
+
+from services.role_permissions import (
+    InvalidPermissionsError,
+    RoleNotFoundError,
+    list_role_permissions,
+    replace_role_permissions,
 )
 
 
@@ -36,7 +40,7 @@ router = APIRouter(
 
 @router.get(
     "",
-    response_model=list[RolePermissionResponse]
+    response_model=list[RolePermissionResponse],
 )
 async def get_role_permissions_endpoint(
     role_id: int,
@@ -46,6 +50,7 @@ async def get_role_permissions_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ROLES_READ,
+                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -71,7 +76,7 @@ async def get_role_permissions_endpoint(
 
 @router.put(
     "",
-    response_model=list[RolePermissionResponse]
+    response_model=list[RolePermissionResponse],
 )
 async def update_role_permissions_endpoint(
     role_id: int,
@@ -82,6 +87,7 @@ async def update_role_permissions_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ROLES_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],

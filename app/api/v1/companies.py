@@ -32,21 +32,6 @@ router = APIRouter(
 
 
 @router.get(
-    "",
-    response_model=list[CompanyResponse],
-)
-async def get_companies_endpoint(
-    session: AsyncSession = Depends(
-        get_session,
-    ),
-    _: User = Depends(
-        get_current_user,
-    ),
-) -> list[CompanyResponse]:
-    return await list_companies(session)
-
-
-@router.get(
     "/{company_id}",
     response_model=CompanyResponse,
 )
@@ -69,33 +54,6 @@ async def get_company_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found",
-        )
-
-
-@router.post(
-    "",
-    response_model=CompanyResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_company_endpoint(
-    data: CompanyCreate,
-    session: AsyncSession = Depends(
-        get_session,
-    ),
-    _: User = Depends(
-        get_current_user,
-    ),
-) -> CompanyResponse:
-    try:
-        return await create_new_company(
-            session,
-            data,
-        )
-
-    except ParentCompanyNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Parent company not found",
         )
 
 

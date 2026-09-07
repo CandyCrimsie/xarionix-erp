@@ -21,6 +21,7 @@ from repositories.roles import (
 
 from core.permissions.scopes import (
     PermissionScope,
+    get_scope_rank,
 )
 
 
@@ -97,6 +98,7 @@ class AuthorizationService:
         company_id: int,
         company_membership_id: int,
         permission: PermissionCode | str,
+        minimum_scope: PermissionScope | None = None,
     ) -> bool:
         permission_code = (
             permission.value
@@ -116,9 +118,19 @@ class AuthorizationService:
             )
         )
 
-        return (
+        permission_scope = permissions.get(
             permission_code
-            in permissions
+        )
+
+        if permission_scope is None:
+            return False
+
+        if minimum_scope is None:
+            return True
+
+        return (
+            get_scope_rank(permission_scope)
+            >= get_scope_rank(minimum_scope)
         )
 
     async def get_permission_scope(

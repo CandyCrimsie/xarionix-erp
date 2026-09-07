@@ -9,6 +9,9 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.permissions.codes import PermissionCode
+from core.permissions.scopes import (
+    PermissionScope,
+)
 
 from dependencies.authorization import require_permission
 from dependencies.company import CurrentCompanyContext
@@ -46,6 +49,7 @@ async def get_roles_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ROLES_READ,
+                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -74,6 +78,7 @@ async def create_role_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ROLES_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -109,6 +114,7 @@ async def get_role_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ROLES_READ,
+                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -145,6 +151,7 @@ async def update_role_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ROLES_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],

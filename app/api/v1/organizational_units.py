@@ -8,11 +8,6 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dependencies.auth import get_current_user
-from dependencies.database import get_session
-
-from models.users import User
-
 from schemas.organizational_units import (
     OrganizationalUnitCreate,
     OrganizationalUnitResponse,
@@ -29,6 +24,24 @@ from services.organizational_units import (
     get_organizational_unit,
     list_organizational_units,
     update_organizational_unit,
+)
+
+from core.permissions.codes import (
+    PermissionCode,
+)
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
+from dependencies.database import (
+    get_session
+)
+from dependencies.authorization import (
+    require_permission,
+)
+from dependencies.company import (
+    CurrentCompanyContext,
+    ensure_company_matches_context,
 )
 
 
@@ -52,9 +65,14 @@ async def get_units_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.ORGANIZATIONAL_UNITS_READ,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> list[OrganizationalUnitResponse]:
     try:
@@ -83,9 +101,14 @@ async def get_unit_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.ORGANIZATIONAL_UNITS_READ,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
     ],
 ) -> OrganizationalUnitResponse:
     try:
@@ -116,10 +139,10 @@ async def create_unit_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
+    require_permission(
+        PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
+        minimum_scope=PermissionScope.COMPANY,
+    ),
 ) -> OrganizationalUnitResponse:
     try:
         return await create_new_organizational_unit(
@@ -164,10 +187,10 @@ async def update_unit_endpoint(
         Depends(get_session),
     ],
 
-    _: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
+    require_permission(
+        PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
+        minimum_scope=PermissionScope.COMPANY,
+    )
 ) -> OrganizationalUnitResponse:
     try:
         return await update_organizational_unit(

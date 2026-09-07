@@ -1,7 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.permissions import Permission
-
 from repositories.permissions import (
     get_permissions_by_ids,
 )
