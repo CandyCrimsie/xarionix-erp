@@ -1,0 +1,40 @@
+services:
+  postgres_test:
+    image: postgres:18.6
+    container_name: xarionix_postgres_test
+
+    ports:
+      - "127.0.0.1:55432:5432"
+
+    environment:
+      POSTGRES_USER: xarionix_test
+      POSTGRES_PASSWORD: xarionix_test
+      POSTGRES_DB: xarionix_test
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xarionix_test -d xarionix_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  redis_test:
+    image: redis:8-alpine
+    container_name: xarionix_redis_test
+
+    ports:
+      - "127.0.0.1:56379:6379"
+
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --requirepass
+      - xarionix_test
+
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a xarionix_test ping | grep PONG"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
