@@ -21,7 +21,8 @@ from services.authorization import (
 )
 
 from schemas.role_permissions import (
-    RolePermissionAssignment
+    RolePermissionAssignment,
+    RolePermissionResponse,
 )
 
 
@@ -66,16 +67,20 @@ async def list_role_permissions(
     *,
     company_id: int,
     role_id: int,
-) -> list[Permission]:
+) -> list[RolePermissionResponse]:
     await _get_company_role(
         session,
         company_id=company_id,
         role_id=role_id,
     )
 
-    return await get_role_permissions(
+    rows = await get_role_permissions(
         session,
         role_id,
+    )
+
+    return _build_role_permission_responses(
+        rows
     )
 
 
@@ -161,7 +166,28 @@ async def replace_role_permissions(
         role_id=role.id,
     )
 
-    return await get_role_permissions(
+    rows = await get_role_permissions(
         session,
         role.id,
     )
+
+    return _build_role_permission_responses(
+        rows
+    )
+
+
+def _build_role_permission_responses(
+    rows,
+) -> list[RolePermissionResponse]:
+    return [
+        RolePermissionResponse(
+            permission_id=permission.id,
+            code=permission.code,
+            name=permission.name,
+            module=permission.module,
+            description=permission.description,
+            is_active=permission.is_active,
+            scope=scope,
+        )
+        for permission, scope in rows
+    ]

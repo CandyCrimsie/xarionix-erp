@@ -22,11 +22,9 @@ from schemas.role_permissions import (
     RolePermissionsUpdate,
 )
 
-from services.role_permissions import (
-    InvalidPermissionsError,
-    RoleNotFoundError,
-    list_role_permissions,
-    replace_role_permissions,
+from schemas.role_permissions import (
+    RolePermissionResponse,
+    RolePermissionsUpdate,
 )
 
 
@@ -38,7 +36,7 @@ router = APIRouter(
 
 @router.get(
     "",
-    response_model=list[PermissionResponse],
+    response_model=list[RolePermissionResponse]
 )
 async def get_role_permissions_endpoint(
     role_id: int,
@@ -56,7 +54,7 @@ async def get_role_permissions_endpoint(
         AsyncSession,
         Depends(get_session),
     ],
-) -> list[PermissionResponse]:
+) -> list[RolePermissionResponse]:
     try:
         return await list_role_permissions(
             session,
@@ -73,7 +71,7 @@ async def get_role_permissions_endpoint(
 
 @router.put(
     "",
-    response_model=list[PermissionResponse],
+    response_model=list[RolePermissionResponse]
 )
 async def update_role_permissions_endpoint(
     role_id: int,
@@ -92,13 +90,13 @@ async def update_role_permissions_endpoint(
         AsyncSession,
         Depends(get_session),
     ],
-) -> list[PermissionResponse]:
+) -> list[RolePermissionResponse]:
     try:
         return await replace_role_permissions(
             session,
             company_id=context.company.id,
             role_id=role_id,
-            permission_ids=data.permission_ids,
+            permissions=data.permissions,
         )
 
     except RoleNotFoundError:

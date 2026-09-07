@@ -7,15 +7,23 @@ from models.permissions import Permission
 from models.role_permissions import RolePermission
 from models.roles import Role
 
+from core.permissions.scopes import (
+    PermissionScope,
+    get_broader_scope,
+)
+
 
 async def get_effective_permission_codes(
     session: AsyncSession,
     *,
     company_id: int,
     company_membership_id: int,
-) -> set[str]:
+) -> dict[str, PermissionScope]:
     stmt = (
-        select(Permission.code)
+        select(
+            Permission.code,
+            RolePermission.scope,
+        )
         .join(
             RolePermission,
             RolePermission.permission_id
@@ -52,14 +60,30 @@ async def get_effective_permission_codes(
 
             Permission.is_active.is_(True),
         )
-        .distinct()
     )
 
     result = await session.execute(stmt)
 
-    return set(
-        result.scalars().all()
-    )
+    effective: dict[
+        str,
+        PermissionScope,
+    ] = {}
+
+    for code, scope in result.all():
+        scope = PermissionScope(scope)
+
+        current_scope = effective.get(code)
+
+        if current_scope is None:
+            effective[code] = scope
+            continue
+
+        effective[code] = get_broader_scope(
+            current_scope,
+            scope,
+        )
+
+    return effective
 
 
 async def get_membership_ids_by_role(

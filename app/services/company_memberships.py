@@ -25,6 +25,10 @@ from repositories.users import (
     get_user_by_id,
 )
 
+from services.authorization import (
+    invalidate_membership_permissions,
+)
+
 
 class CompanyNotFoundError(Exception):
     pass
@@ -148,6 +152,11 @@ async def update_company_membership(
 
     await session.commit()
     await session.refresh(membership)
+
+    await invalidate_membership_permissions(
+        company_id=membership.company_id,
+        company_membership_id=membership.id,
+    )
 
     return membership
 

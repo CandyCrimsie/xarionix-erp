@@ -47,3 +47,17 @@ class RolePermissionsUpdate(BaseModel):
             )
 
         return value
+
+
+class RolePermissionResponse(BaseModel):
+    permission_id: int
+
+    code: str
+    name: str
+    module: str
+
+    description: str | None
+
+    is_active: bool
+
+    scope: PermissionScope

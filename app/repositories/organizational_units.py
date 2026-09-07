@@ -59,3 +59,56 @@ async def create_organizational_unit(
     await session.flush()
 
     return unit
+
+
+async def get_unit_tree_ids(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    unit_id: int,
+) -> set[int]:
+    unit_tree = (
+        select(
+            OrganizationalUnit.id
+        )
+        .where(
+            OrganizationalUnit.id
+            == unit_id,
+
+            OrganizationalUnit.company_id
+            == company_id,
+
+            OrganizationalUnit.is_active.is_(True),
+        )
+        .cte(
+            name="unit_tree",
+            recursive=True,
+        )
+    )
+
+    descendants = (
+        select(
+            OrganizationalUnit.id
+        )
+        .where(
+            OrganizationalUnit.parent_id
+            == unit_tree.c.id,
+
+            OrganizationalUnit.company_id
+            == company_id,
+
+            OrganizationalUnit.is_active.is_(True),
+        )
+    )
+
+    unit_tree = unit_tree.union_all(
+        descendants
+    )
+
+    result = await session.execute(
+        select(unit_tree.c.id)
+    )
+
+    return set(
+        result.scalars().all()
+    )

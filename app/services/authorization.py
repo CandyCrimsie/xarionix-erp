@@ -19,6 +19,10 @@ from repositories.roles import (
     get_role_by_id,
 )
 
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
 
 class AuthorizationService:
     def __init__(
@@ -44,12 +48,10 @@ class AuthorizationService:
         *,
         company_id: int,
         company_membership_id: int,
-    ) -> set[str]:
+    ) -> dict[str, PermissionScope]:
         cache_key = self._get_cache_key(
             company_id=company_id,
-            company_membership_id=(
-                company_membership_id
-            ),
+            company_membership_id=company_membership_id,
         )
 
         cached = await redis_client.get(
@@ -57,24 +59,32 @@ class AuthorizationService:
         )
 
         if cached is not None:
-            return set(
-                json.loads(cached)
+            cached_permissions = json.loads(
+                cached
             )
+
+            return {
+                code: PermissionScope(scope)
+                for code, scope
+                in cached_permissions.items()
+            }
 
         permissions = (
             await get_effective_permission_codes(
                 self.session,
                 company_id=company_id,
-                company_membership_id=(
-                    company_membership_id
-                ),
+                company_membership_id=company_membership_id,
             )
         )
 
         await redis_client.set(
             cache_key,
             json.dumps(
-                sorted(permissions)
+                {
+                    code: scope.value
+                    for code, scope
+                    in permissions.items()
+                }
             ),
             ex=AUTHORIZATION_CACHE_TTL_SECONDS,
         )
@@ -109,6 +119,33 @@ class AuthorizationService:
         return (
             permission_code
             in permissions
+        )
+
+    async def get_permission_scope(
+        self,
+        *,
+        company_id: int,
+        company_membership_id: int,
+        permission: PermissionCode | str,
+    ) -> PermissionScope | None:
+        permission_code = (
+            permission.value
+            if isinstance(
+                permission,
+                PermissionCode,
+            )
+            else permission
+        )
+
+        permissions = (
+            await self.get_effective_permissions(
+                company_id=company_id,
+                company_membership_id=company_membership_id,
+            )
+        )
+
+        return permissions.get(
+            permission_code
         )
 
 

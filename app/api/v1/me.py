@@ -69,7 +69,7 @@ async def get_my_permissions(
         session,
     )
 
-    permissions = (
+    effective = (
         await authorization.get_effective_permissions(
             company_id=context.company.id,
             company_membership_id=context.membership.id,
@@ -77,5 +77,11 @@ async def get_my_permissions(
     )
 
     return EffectivePermissionsResponse(
-        permissions=sorted(permissions),
+        permissions=sorted(
+            effective.keys()
+        ),
+        scopes={
+            code: effective[code]
+            for code in sorted(effective)
+        },
     )

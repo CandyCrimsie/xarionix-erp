@@ -94,3 +94,26 @@ async def clear_primary_unit_memberships(
     )
 
     await session.execute(stmt)
+
+
+async def get_primary_unit_id(
+    session: AsyncSession,
+    company_membership_id: int,
+) -> int | None:
+    stmt = (
+        select(UnitMembership.unit_id)
+        .where(
+            UnitMembership.company_membership_id
+            == company_membership_id,
+
+            UnitMembership.is_active.is_(True),
+
+            UnitMembership.is_primary.is_(True),
+        )
+    )
+
+    result = await session.execute(
+        stmt
+    )
+
+    return result.scalar_one_or_none()
