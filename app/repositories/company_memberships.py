@@ -6,6 +6,14 @@ from models.company_memberships import (
     CompanyMembership,
 )
 
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
+from models.unit_memberships import (
+    UnitMembership,
+)
+
 
 async def get_company_membership_by_id(
     session: AsyncSession,
@@ -54,6 +62,76 @@ async def get_company_memberships(
     )
 
     result = await session.execute(stmt)
+
+    return list(
+        result.scalars().all()
+    )
+
+
+async def get_scoped_company_memberships(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    current_membership_id: int,
+    scope: PermissionScope,
+    unit_ids: set[int] | None = None,
+) -> list[CompanyMembership]:
+    stmt = (
+        select(CompanyMembership)
+        .where(
+            CompanyMembership.company_id
+            == company_id
+        )
+    )
+
+    if scope == PermissionScope.SELF:
+        stmt = stmt.where(
+            CompanyMembership.id
+            == current_membership_id
+        )
+
+    elif scope in {
+        PermissionScope.OWN_UNIT,
+        PermissionScope.OWN_UNIT_TREE,
+    }:
+        if not unit_ids:
+            return []
+
+        stmt = (
+            stmt
+            .join(
+                UnitMembership,
+                UnitMembership.company_membership_id
+                == CompanyMembership.id,
+            )
+            .where(
+                UnitMembership.is_active.is_(
+                    True
+                ),
+                UnitMembership.is_primary.is_(
+                    True
+                ),
+                UnitMembership.unit_id.in_(
+                    unit_ids
+                ),
+            )
+        )
+
+    elif scope == PermissionScope.COMPANY:
+        pass
+
+    else:
+        raise ValueError(
+            f"Unsupported permission scope: {scope}"
+        )
+
+    stmt = stmt.order_by(
+        CompanyMembership.id.asc()
+    )
+
+    result = await session.execute(
+        stmt
+    )
 
     return list(
         result.scalars().all()

@@ -19,15 +19,35 @@ from repositories.company_memberships import (
     get_company_membership_by_user,
     get_company_memberships,
     get_available_companies_for_user,
+    get_scoped_company_memberships,
 )
 
 from repositories.users import (
     get_user_by_id,
 )
 
+from core.permissions.codes import (
+    PermissionCode,
+)
+
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
 from services.authorization import (
+    AuthorizationService,
     invalidate_membership_permissions,
 )
+
+from services.scopes import (
+    ScopeService,
+)
+
+
+class CompanyMembershipPermissionDeniedError(
+    Exception
+):
+    pass
 
 
 class CompanyNotFoundError(Exception):
@@ -44,6 +64,66 @@ class CompanyMembershipNotFoundError(Exception):
 
 class CompanyMembershipAlreadyExistsError(Exception):
     pass
+
+
+async def list_scoped_company_memberships(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    current_membership_id: int,
+) -> list[CompanyMembership]:
+    company = await get_company_by_id(
+        session,
+        company_id,
+    )
+
+    if company is None:
+        raise CompanyNotFoundError
+
+    authorization = AuthorizationService(
+        session
+    )
+
+    scope = await authorization.get_permission_scope(
+        company_id=company_id,
+        company_membership_id=(
+            current_membership_id
+        ),
+        permission=PermissionCode.MEMBERS_READ,
+    )
+
+    if scope is None:
+        raise (
+            CompanyMembershipPermissionDeniedError
+        )
+
+    unit_ids: set[int] | None = None
+
+    if scope in {
+        PermissionScope.OWN_UNIT,
+        PermissionScope.OWN_UNIT_TREE,
+    }:
+        scope_service = ScopeService(
+            session
+        )
+
+        unit_ids = await scope_service.get_unit_ids(
+            scope=scope,
+            company_id=company_id,
+            company_membership_id=(
+                current_membership_id
+            ),
+        )
+
+    return await get_scoped_company_memberships(
+        session,
+        company_id=company_id,
+        current_membership_id=(
+            current_membership_id
+        ),
+        scope=scope,
+        unit_ids=unit_ids,
+    )
 
 
 async def list_company_memberships(
