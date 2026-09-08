@@ -13,6 +13,14 @@ from repositories.company import (
     get_company_by_id,
 )
 
+from repositories.organizational_units import (
+    get_organizational_unit_by_id,
+)
+
+from repositories.unit_memberships import (
+    create_unit_membership,
+)
+
 from repositories.company_memberships import (
     create_company_membership,
     get_company_membership_by_id,
@@ -64,6 +72,18 @@ class CompanyMembershipNotFoundError(Exception):
 
 
 class CompanyMembershipAlreadyExistsError(Exception):
+    pass
+
+
+class CompanyMembershipPrimaryUnitRequiredError(
+    Exception
+):
+    pass
+
+
+class CompanyMembershipUnitNotFoundError(
+    Exception
+):
     pass
 
 
@@ -187,6 +207,146 @@ async def add_user_to_company(
 
         await session.commit()
         await session.refresh(membership)
+
+        return membership
+
+    except IntegrityError:
+        await session.rollback()
+
+        raise CompanyMembershipAlreadyExistsError
+
+
+async def add_scoped_user_to_company(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    user_id: int,
+    current_membership_id: int,
+    primary_unit_id: int | None,
+) -> CompanyMembership:
+    company = await get_company_by_id(
+        session,
+        company_id,
+    )
+
+    if company is None:
+        raise CompanyNotFoundError
+
+    user = await get_user_by_id(
+        session=session,
+        user_id=user_id,
+    )
+
+    if user is None:
+        raise UserNotFoundError
+
+    existing_membership = (
+        await get_company_membership_by_user(
+            session,
+            company_id=company_id,
+            user_id=user_id,
+        )
+    )
+
+    if existing_membership is not None:
+        raise CompanyMembershipAlreadyExistsError
+
+    authorization = AuthorizationService(
+        session
+    )
+
+    scope = await authorization.get_permission_scope(
+        company_id=company_id,
+        company_membership_id=(
+            current_membership_id
+        ),
+        permission=PermissionCode.MEMBERS_MANAGE,
+    )
+
+    if scope is None:
+        raise (
+            CompanyMembershipPermissionDeniedError
+        )
+
+    #
+    # Для unit-scoped manager нельзя создать
+    # сотрудника без target unit, иначе scope
+    # невозможно проверить.
+    #
+    if (
+        scope
+        in {
+            PermissionScope.OWN_UNIT,
+            PermissionScope.OWN_UNIT_TREE,
+        }
+        and primary_unit_id is None
+    ):
+        raise (
+            CompanyMembershipPrimaryUnitRequiredError
+        )
+
+    if primary_unit_id is not None:
+        unit = await get_organizational_unit_by_id(
+            session,
+            primary_unit_id,
+        )
+
+        if (
+            unit is None
+            or unit.company_id != company_id
+            or not unit.is_active
+        ):
+            raise CompanyMembershipUnitNotFoundError
+
+        if scope in {
+            PermissionScope.OWN_UNIT,
+            PermissionScope.OWN_UNIT_TREE,
+        }:
+            scope_service = ScopeService(
+                session
+            )
+
+            allowed_unit_ids = (
+                await scope_service.get_unit_ids(
+                    scope=scope,
+                    company_id=company_id,
+                    company_membership_id=(
+                        current_membership_id
+                    ),
+                )
+            )
+
+            if (
+                primary_unit_id
+                not in allowed_unit_ids
+            ):
+                raise (
+                    CompanyMembershipUnitNotFoundError
+                )
+
+    try:
+        membership = (
+            await create_company_membership(
+                session,
+                user_id=user_id,
+                company_id=company_id,
+            )
+        )
+
+        if primary_unit_id is not None:
+            await create_unit_membership(
+                session,
+                company_membership_id=(
+                    membership.id
+                ),
+                unit_id=primary_unit_id,
+                is_primary=True,
+            )
+
+        await session.commit()
+        await session.refresh(
+            membership
+        )
 
         return membership
 

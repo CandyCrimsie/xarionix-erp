@@ -9,6 +9,8 @@ from pydantic import (
 class CompanyMembershipCreate(BaseModel):
     user_id: int
 
+    primary_unit_id: int | None = None
+
 
 class CompanyMembershipUpdate(BaseModel):
     is_active: bool
