@@ -34,11 +34,23 @@ from services.authorization import (
 )
 
 from services.company_memberships import (
+    CompanyMembershipAlreadyExistsError,
     CompanyMembershipNotFoundError,
     CompanyMembershipPermissionDeniedError,
+    CompanyMembershipPrimaryUnitRequiredError,
+    CompanyMembershipUnitNotFoundError,
+    add_scoped_user_to_company,
     get_scoped_company_membership,
     list_scoped_company_memberships,
     update_scoped_company_membership,
+)
+
+from repositories.company_memberships import (
+    get_company_membership_by_user,
+)
+
+from repositories.unit_memberships import (
+    get_primary_unit_id,
 )
 
 
@@ -67,6 +79,23 @@ async def create_membership(
     await session.flush()
 
     return membership
+
+
+async def create_user(
+    session: AsyncSession,
+    *,
+    username: str,
+) -> User:
+    user = User(
+        username=username,
+        password_hash="test",
+    )
+
+    session.add(user)
+
+    await session.flush()
+
+    return user
 
 
 async def create_role_with_members_manage(
@@ -1137,5 +1166,490 @@ async def test_update_service_read_permission_does_not_grant_manage(
         ctx["same_unit"].is_active
         is True
     )
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_own_unit_can_create_in_own_unit(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="new-own-unit-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    membership = await add_scoped_user_to_company(
+        db_session,
+        company_id=ctx["company"].id,
+        user_id=user.id,
+        current_membership_id=(
+            ctx["current"].id
+        ),
+        primary_unit_id=ctx["support"].id,
+    )
+
+    assert membership.user_id == user.id
+    assert membership.company_id == (
+        ctx["company"].id
+    )
+
+    primary_unit_id = await get_primary_unit_id(
+        db_session,
+        membership.id,
+    )
+
+    assert primary_unit_id == (
+        ctx["support"].id
+    )
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_own_unit_cannot_create_in_child_unit(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="new-child-denied-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipUnitNotFoundError
+    ):
+        await add_scoped_user_to_company(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            primary_unit_id=(
+                ctx["support_l1"].id
+            ),
+        )
+
+    membership = (
+        await get_company_membership_by_user(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+        )
+    )
+
+    assert membership is None
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_own_unit_requires_primary_unit(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="new-without-unit-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipPrimaryUnitRequiredError
+    ):
+        await add_scoped_user_to_company(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            primary_unit_id=None,
+        )
+
+    membership = (
+        await get_company_membership_by_user(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+        )
+    )
+
+    assert membership is None
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_own_unit_tree_can_create_in_child_unit(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="new-tree-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope.OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    membership = await add_scoped_user_to_company(
+        db_session,
+        company_id=ctx["company"].id,
+        user_id=user.id,
+        current_membership_id=(
+            ctx["current"].id
+        ),
+        primary_unit_id=(
+            ctx["support_l1"].id
+        ),
+    )
+
+    primary_unit_id = await get_primary_unit_id(
+        db_session,
+        membership.id,
+    )
+
+    assert primary_unit_id == (
+        ctx["support_l1"].id
+    )
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_own_unit_tree_cannot_create_in_other_branch(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="new-other-branch-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope.OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipUnitNotFoundError
+    ):
+        await add_scoped_user_to_company(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            primary_unit_id=ctx["noc"].id,
+        )
+
+    membership = (
+        await get_company_membership_by_user(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+        )
+    )
+
+    assert membership is None
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_company_can_create_without_unit(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="new-company-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    membership = await add_scoped_user_to_company(
+        db_session,
+        company_id=ctx["company"].id,
+        user_id=user.id,
+        current_membership_id=(
+            ctx["current"].id
+        ),
+        primary_unit_id=None,
+    )
+
+    assert membership.user_id == user.id
+
+    primary_unit_id = await get_primary_unit_id(
+        db_session,
+        membership.id,
+    )
+
+    assert primary_unit_id is None
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_company_can_create_with_primary_unit(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="new-company-unit-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    membership = await add_scoped_user_to_company(
+        db_session,
+        company_id=ctx["company"].id,
+        user_id=user.id,
+        current_membership_id=(
+            ctx["current"].id
+        ),
+        primary_unit_id=ctx["noc"].id,
+    )
+
+    primary_unit_id = await get_primary_unit_id(
+        db_session,
+        membership.id,
+    )
+
+    assert primary_unit_id == ctx["noc"].id
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_company_cannot_use_foreign_unit(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    foreign_unit = OrganizationalUnit(
+        company_id=ctx["foreign_company"].id,
+        name="Foreign Department",
+        type=(
+            OrganizationalUnitType.DEPARTMENT
+        ),
+    )
+
+    db_session.add(foreign_unit)
+
+    user = await create_user(
+        db_session,
+        username="new-foreign-unit-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipUnitNotFoundError
+    ):
+        await add_scoped_user_to_company(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            primary_unit_id=foreign_unit.id,
+        )
+
+    membership = (
+        await get_company_membership_by_user(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+        )
+    )
+
+    assert membership is None
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_without_manage_permission_is_denied(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="new-denied-user",
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipPermissionDeniedError
+    ):
+        await add_scoped_user_to_company(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            primary_unit_id=ctx["support"].id,
+        )
+
+    membership = (
+        await get_company_membership_by_user(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=user.id,
+        )
+    )
+
+    assert membership is None
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_create_service_existing_membership_is_rejected(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipAlreadyExistsError
+    ):
+        await add_scoped_user_to_company(
+            db_session,
+            company_id=ctx["company"].id,
+            user_id=(
+                ctx["same_unit"].user_id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            primary_unit_id=ctx["support"].id,
+        )
 
     await clear_authorization_cache()
