@@ -21,7 +21,7 @@ from services.company_memberships import (
     CompanyNotFoundError,
     UserNotFoundError,
     add_user_to_company,
-    get_company_membership,
+    get_scoped_company_membership,
     list_scoped_company_memberships,
     update_company_membership,
 )
@@ -117,7 +117,6 @@ async def get_company_member_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_READ,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -128,16 +127,25 @@ async def get_company_member_endpoint(
     )
 
     try:
-        return await get_company_membership(
+        return await get_scoped_company_membership(
             session,
             company_id=company_id,
             membership_id=membership_id,
+            current_membership_id=(
+                context.membership.id
+            ),
         )
 
     except CompanyMembershipNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company membership not found",
+        )
+
+    except CompanyMembershipPermissionDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied",
         )
 
 
