@@ -23,7 +23,7 @@ from services.company_memberships import (
     add_user_to_company,
     get_scoped_company_membership,
     list_scoped_company_memberships,
-    update_company_membership,
+    update_scoped_company_membership,
 )
 
 from core.permissions.codes import (
@@ -223,7 +223,6 @@ async def update_company_member_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_MANAGE,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -234,10 +233,13 @@ async def update_company_member_endpoint(
     )
 
     try:
-        return await update_company_membership(
+        return await update_scoped_company_membership(
             session,
             company_id=company_id,
             membership_id=membership_id,
+            current_membership_id=(
+                context.membership.id
+            ),
             is_active=data.is_active,
         )
 
@@ -245,4 +247,10 @@ async def update_company_member_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company membership not found",
+        )
+
+    except CompanyMembershipPermissionDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied",
         )
