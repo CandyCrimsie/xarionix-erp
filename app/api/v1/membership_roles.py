@@ -30,7 +30,11 @@ from services.membership_roles import (
     CompanyMembershipNotFoundError,
     InvalidRolesError,
     list_membership_roles,
-    replace_membership_roles,
+    replace_membership_roles_with_delegation,
+)
+
+from services.role_assignment_policy import (
+    RoleAssignmentNotAllowedError,
 )
 
 
@@ -100,10 +104,15 @@ async def update_membership_roles_endpoint(
     ],
 ) -> list[RoleResponse]:
     try:
-        return await replace_membership_roles(
+        return await replace_membership_roles_with_delegation(
             session,
             company_id=context.company.id,
-            company_membership_id=company_membership_id,
+            actor_membership_id=(
+                context.membership.id
+            ),
+            company_membership_id=(
+                company_membership_id
+            ),
             role_ids=data.role_ids,
         )
 
@@ -124,6 +133,17 @@ async def update_membership_roles_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "message": "Invalid roles",
+                "role_ids": exc.role_ids,
+            },
+        )
+
+    except RoleAssignmentNotAllowedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": (
+                    "Role assignment is not allowed"
+                ),
                 "role_ids": exc.role_ids,
             },
         )
