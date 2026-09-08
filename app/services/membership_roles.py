@@ -4,6 +4,7 @@ from models.roles import Role
 
 from repositories.company_memberships import (
     get_company_membership_by_id,
+    get_scoped_company_membership_by_id,
 )
 
 from repositories.membership_roles import (
@@ -17,11 +18,24 @@ from repositories.roles import (
 )
 
 from services.authorization import (
+    AuthorizationService,
     invalidate_membership_permissions,
+)
+
+from services.scopes import (
+    ScopeService,
 )
 
 from services.role_assignment_policy import (
     ensure_role_changes_are_delegated,
+)
+
+from core.permissions.codes import (
+    PermissionCode,
+)
+
+from core.permissions.scopes import (
+    PermissionScope,
 )
 
 
@@ -30,6 +44,12 @@ class CompanyMembershipNotFoundError(Exception):
 
 
 class CompanyMembershipInactiveError(Exception):
+    pass
+
+
+class RoleAssignmentPermissionDeniedError(
+    Exception
+):
     pass
 
 
@@ -158,6 +178,75 @@ async def _get_company_membership(
     return membership
 
 
+async def _get_scoped_target_membership(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    actor_membership_id: int,
+    target_membership_id: int,
+):
+    authorization = AuthorizationService(
+        session
+    )
+
+    scope = (
+        await authorization.get_permission_scope(
+            company_id=company_id,
+            company_membership_id=(
+                actor_membership_id
+            ),
+            permission=(
+                PermissionCode.ROLES_ASSIGN
+            ),
+        )
+    )
+
+    if scope is None:
+        raise (
+            RoleAssignmentPermissionDeniedError
+        )
+
+    unit_ids: set[int] | None = None
+
+    if scope in {
+        PermissionScope.OWN_UNIT,
+        PermissionScope.OWN_UNIT_TREE,
+    }:
+        scope_service = ScopeService(
+            session
+        )
+
+        unit_ids = (
+            await scope_service.get_unit_ids(
+                scope=scope,
+                company_id=company_id,
+                company_membership_id=(
+                    actor_membership_id
+                ),
+            )
+        )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            session,
+            company_id=company_id,
+            membership_id=(
+                target_membership_id
+            ),
+            current_membership_id=(
+                actor_membership_id
+            ),
+            scope=scope,
+            unit_ids=unit_ids,
+        )
+    )
+
+    if membership is None:
+        raise CompanyMembershipNotFoundError
+
+    return membership
+
+
 async def list_membership_roles(
     session: AsyncSession,
     *,
@@ -234,10 +323,13 @@ async def replace_membership_roles_with_delegation(
         raise CompanyMembershipInactiveError
 
     target_membership = (
-        await _get_company_membership(
+        await _get_scoped_target_membership(
             session,
             company_id=company_id,
-            company_membership_id=(
+            actor_membership_id=(
+                actor_membership_id
+            ),
+            target_membership_id=(
                 company_membership_id
             ),
         )
