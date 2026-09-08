@@ -122,6 +122,53 @@ async def create_role_with_members_read(
     await session.flush()
 
 
+async def create_role_with_members_manage(
+    session: AsyncSession,
+    *,
+    company: Company,
+    membership: CompanyMembership,
+    scope: PermissionScope,
+) -> None:
+    permission = Permission(
+        code="members.manage",
+        name="Manage members",
+        module="members",
+    )
+
+    role = Role(
+        company_id=company.id,
+        name=f"Manager {scope.value}",
+    )
+
+    session.add_all(
+        [
+            permission,
+            role,
+        ]
+    )
+
+    await session.flush()
+
+    session.add_all(
+        [
+            RolePermission(
+                role_id=role.id,
+                permission_id=permission.id,
+                scope=scope,
+            ),
+
+            MembershipRole(
+                company_membership_id=(
+                    membership.id
+                ),
+                role_id=role.id,
+            ),
+        ]
+    )
+
+    await session.flush()
+
+
 async def create_context(
     session: AsyncSession,
 ):
@@ -932,6 +979,421 @@ async def test_api_target_path_company_must_match_context(
             f"{ctx['foreign'].id}"
         ),
         headers=headers,
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Company not found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_update_own_unit_can_update_same_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members/"
+            f"{ctx['same_unit'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == (
+        ctx["same_unit"].id
+    )
+    assert (
+        response.json()["is_active"]
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_update_own_unit_cannot_update_child(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members/"
+            f"{ctx['child_unit'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": False,
+        },
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Company membership not found",
+    }
+
+    assert (
+        ctx["child_unit"].is_active
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_update_own_unit_tree_can_update_child(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope.OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members/"
+            f"{ctx['child_unit'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == (
+        ctx["child_unit"].id
+    )
+    assert (
+        response.json()["is_active"]
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_update_own_unit_tree_cannot_update_other_branch(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope.OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members/"
+            f"{ctx['other_unit'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": False,
+        },
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Company membership not found",
+    }
+
+    assert (
+        ctx["other_unit"].is_active
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_update_company_can_update_company_member(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members/"
+            f"{ctx['other_unit'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == (
+        ctx["other_unit"].id
+    )
+    assert (
+        response.json()["is_active"]
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_update_company_cannot_cross_company(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members/"
+            f"{ctx['foreign'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": False,
+        },
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Company membership not found",
+    }
+
+    assert ctx["foreign"].is_active is True
+
+
+@pytest.mark.asyncio
+async def test_api_update_without_manage_permission_is_forbidden(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members/"
+            f"{ctx['same_unit'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": False,
+        },
+    )
+
+    assert response.status_code == 403
+
+    assert response.json() == {
+        "detail": "Permission denied",
+    }
+
+    assert (
+        ctx["same_unit"].is_active
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_update_read_permission_does_not_grant_manage(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members/"
+            f"{ctx['same_unit'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": False,
+        },
+    )
+
+    assert response.status_code == 403
+
+    assert response.json() == {
+        "detail": "Permission denied",
+    }
+
+    assert (
+        ctx["same_unit"].is_active
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_update_path_company_must_match_context(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['foreign_company'].id}/members/"
+            f"{ctx['foreign'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": False,
+        },
     )
 
     assert response.status_code == 404
