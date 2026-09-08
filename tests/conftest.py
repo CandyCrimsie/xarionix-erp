@@ -2,6 +2,11 @@ import os
 import sys
 from pathlib import Path
 
+from httpx import (
+    ASGITransport,
+    AsyncClient,
+)
+
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -85,6 +90,12 @@ from database.redis import (
     redis_client,
 )  # noqa: E402
 
+from dependencies.database import (
+    get_session,
+)  # noqa: E402
+
+from main import app  # noqa: E402
+
 
 TEST_DATABASE_URL = os.environ[
     "DATABASE_URL"
@@ -140,3 +151,39 @@ async def db_session():
         )
 
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def clean_test_redis():
+    await redis_client.flushdb()
+
+    yield
+
+    await redis_client.flushdb()
+
+
+@pytest_asyncio.fixture
+async def api_client(
+    db_session: AsyncSession,
+):
+    async def override_get_session():
+        yield db_session
+
+    app.dependency_overrides[
+        get_session
+    ] = override_get_session
+
+    transport = ASGITransport(
+        app=app,
+    )
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        yield client
+
+    app.dependency_overrides.pop(
+        get_session,
+        None,
+    )
