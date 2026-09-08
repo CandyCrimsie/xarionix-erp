@@ -22,6 +22,7 @@ from models.unit_memberships import (
 from models.users import User
 
 from repositories.company_memberships import (
+    get_scoped_company_membership_by_id,
     get_scoped_company_memberships,
 )
 
@@ -337,3 +338,247 @@ async def test_unit_scope_without_units_returns_empty_list(
     )
 
     assert memberships == []
+
+
+@pytest.mark.asyncio
+async def test_target_self_scope_can_read_self(
+    db_session: AsyncSession,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=ctx["current"].id,
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            scope=PermissionScope.SELF,
+        )
+    )
+
+    assert membership is not None
+    assert membership.id == ctx["current"].id
+
+
+@pytest.mark.asyncio
+async def test_target_self_scope_cannot_read_other_member(
+    db_session: AsyncSession,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["same_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            scope=PermissionScope.SELF,
+        )
+    )
+
+    assert membership is None
+
+
+@pytest.mark.asyncio
+async def test_target_own_unit_can_read_same_unit(
+    db_session: AsyncSession,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["same_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            scope=PermissionScope.OWN_UNIT,
+            unit_ids={
+                ctx["support"].id,
+            },
+        )
+    )
+
+    assert membership is not None
+    assert membership.id == ctx["same_unit"].id
+
+
+@pytest.mark.asyncio
+async def test_target_own_unit_cannot_read_child_unit(
+    db_session: AsyncSession,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["child_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            scope=PermissionScope.OWN_UNIT,
+            unit_ids={
+                ctx["support"].id,
+            },
+        )
+    )
+
+    assert membership is None
+
+
+@pytest.mark.asyncio
+async def test_target_own_unit_tree_can_read_child_unit(
+    db_session: AsyncSession,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["child_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            scope=(
+                PermissionScope.OWN_UNIT_TREE
+            ),
+            unit_ids={
+                ctx["support"].id,
+                ctx["support_l1"].id,
+            },
+        )
+    )
+
+    assert membership is not None
+    assert membership.id == ctx["child_unit"].id
+
+
+@pytest.mark.asyncio
+async def test_target_own_unit_tree_cannot_read_other_branch(
+    db_session: AsyncSession,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["other_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            scope=(
+                PermissionScope.OWN_UNIT_TREE
+            ),
+            unit_ids={
+                ctx["support"].id,
+                ctx["support_l1"].id,
+            },
+        )
+    )
+
+    assert membership is None
+
+
+@pytest.mark.asyncio
+async def test_target_company_scope_can_read_company_member(
+    db_session: AsyncSession,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["other_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            scope=PermissionScope.COMPANY,
+        )
+    )
+
+    assert membership is not None
+    assert membership.id == ctx["other_unit"].id
+
+
+@pytest.mark.asyncio
+async def test_target_company_scope_cannot_cross_company(
+    db_session: AsyncSession,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=ctx["foreign"].id,
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            scope=PermissionScope.COMPANY,
+        )
+    )
+
+    assert membership is None
+
+
+@pytest.mark.asyncio
+async def test_target_unit_scope_without_units_returns_none(
+    db_session: AsyncSession,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["same_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            scope=PermissionScope.OWN_UNIT,
+            unit_ids=set(),
+        )
+    )
+
+    assert membership is None

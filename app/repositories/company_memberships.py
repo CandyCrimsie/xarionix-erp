@@ -138,6 +138,73 @@ async def get_scoped_company_memberships(
     )
 
 
+async def get_scoped_company_membership_by_id(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    membership_id: int,
+    current_membership_id: int,
+    scope: PermissionScope,
+    unit_ids: set[int] | None = None,
+) -> CompanyMembership | None:
+    stmt = (
+        select(CompanyMembership)
+        .where(
+            CompanyMembership.id
+            == membership_id,
+            CompanyMembership.company_id
+            == company_id,
+        )
+    )
+
+    if scope == PermissionScope.SELF:
+        stmt = stmt.where(
+            CompanyMembership.id
+            == current_membership_id
+        )
+
+    elif scope in {
+        PermissionScope.OWN_UNIT,
+        PermissionScope.OWN_UNIT_TREE,
+    }:
+        if not unit_ids:
+            return None
+
+        stmt = (
+            stmt
+            .join(
+                UnitMembership,
+                UnitMembership.company_membership_id
+                == CompanyMembership.id,
+            )
+            .where(
+                UnitMembership.is_active.is_(
+                    True
+                ),
+                UnitMembership.is_primary.is_(
+                    True
+                ),
+                UnitMembership.unit_id.in_(
+                    unit_ids
+                ),
+            )
+        )
+
+    elif scope == PermissionScope.COMPANY:
+        pass
+
+    else:
+        raise ValueError(
+            f"Unsupported permission scope: {scope}"
+        )
+
+    result = await session.execute(
+        stmt
+    )
+
+    return result.scalar_one_or_none()
+
+
 async def get_user_company_memberships(
     session: AsyncSession,
     user_id: int,
