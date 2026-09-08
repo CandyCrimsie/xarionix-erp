@@ -23,6 +23,11 @@ from schemas.roles import (
     RoleUpdate,
 )
 
+from schemas.role_delegations import (
+    RoleDelegationResponse,
+    RoleDelegationsUpdate,
+)
+
 from services.roles import (
     RoleAlreadyExistsError,
     RoleNotFoundError,
@@ -30,6 +35,14 @@ from services.roles import (
     get_role,
     list_roles,
     update_role,
+)
+
+from services.role_delegations import (
+    InvalidAssignableRolesError,
+    RoleInactiveError as DelegationRoleInactiveError,
+    RoleNotFoundError as DelegationRoleNotFoundError,
+    list_role_delegations,
+    replace_role_delegations_for_role,
 )
 
 
@@ -135,6 +148,105 @@ async def get_role_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Role not found",
+        )
+
+
+@router.get(
+    "/{role_id}/delegations",
+    response_model=list[
+        RoleDelegationResponse
+    ],
+)
+async def get_role_delegations_endpoint(
+    role_id: int,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.ROLES_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> list[RoleDelegationResponse]:
+    try:
+        return await list_role_delegations(
+            session,
+            company_id=context.company.id,
+            manager_role_id=role_id,
+        )
+
+    except DelegationRoleNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role not found",
+        )
+
+
+@router.put(
+    "/{role_id}/delegations",
+    response_model=list[
+        RoleDelegationResponse
+    ],
+)
+async def update_role_delegations_endpoint(
+    role_id: int,
+    data: RoleDelegationsUpdate,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.ROLES_MANAGE,
+                minimum_scope=PermissionScope.COMPANY,
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> list[RoleDelegationResponse]:
+    try:
+        return (
+            await replace_role_delegations_for_role(
+                session,
+                company_id=context.company.id,
+                manager_role_id=role_id,
+                assignable_role_ids=(
+                    data.assignable_role_ids
+                ),
+            )
+        )
+
+    except DelegationRoleNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role not found",
+        )
+
+    except DelegationRoleInactiveError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Role is inactive",
+        )
+
+    except InvalidAssignableRolesError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": (
+                    "Invalid assignable roles"
+                ),
+                "role_ids": exc.role_ids,
+            },
         )
 
 
