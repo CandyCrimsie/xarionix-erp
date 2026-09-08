@@ -285,6 +285,88 @@ async def get_company_membership(
     return membership
 
 
+async def update_scoped_company_membership(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    membership_id: int,
+    current_membership_id: int,
+    is_active: bool,
+) -> CompanyMembership:
+    company = await get_company_by_id(
+        session,
+        company_id,
+    )
+
+    if company is None:
+        raise CompanyNotFoundError
+
+    authorization = AuthorizationService(
+        session
+    )
+
+    scope = await authorization.get_permission_scope(
+        company_id=company_id,
+        company_membership_id=(
+            current_membership_id
+        ),
+        permission=PermissionCode.MEMBERS_MANAGE,
+    )
+
+    if scope is None:
+        raise (
+            CompanyMembershipPermissionDeniedError
+        )
+
+    unit_ids: set[int] | None = None
+
+    if scope in {
+        PermissionScope.OWN_UNIT,
+        PermissionScope.OWN_UNIT_TREE,
+    }:
+        scope_service = ScopeService(
+            session
+        )
+
+        unit_ids = await scope_service.get_unit_ids(
+            scope=scope,
+            company_id=company_id,
+            company_membership_id=(
+                current_membership_id
+            ),
+        )
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            session,
+            company_id=company_id,
+            membership_id=membership_id,
+            current_membership_id=(
+                current_membership_id
+            ),
+            scope=scope,
+            unit_ids=unit_ids,
+        )
+    )
+
+    if membership is None:
+        raise CompanyMembershipNotFoundError
+
+    membership.is_active = is_active
+
+    await session.commit()
+    await session.refresh(
+        membership
+    )
+
+    await invalidate_membership_permissions(
+        company_id=membership.company_id,
+        company_membership_id=membership.id,
+    )
+
+    return membership
+
+
 async def update_company_membership(
     session: AsyncSession,
     *,
