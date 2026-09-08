@@ -81,10 +81,24 @@ import models  # noqa: E402, F401
 
 from database.base import Base  # noqa: E402
 
+from database.redis import (
+    redis_client,
+)  # noqa: E402
+
 
 TEST_DATABASE_URL = os.environ[
     "DATABASE_URL"
 ]
+
+
+@pytest_asyncio.fixture(
+    scope="session",
+    autouse=True,
+)
+async def redis_lifecycle():
+    yield
+
+    await redis_client.aclose()
 
 
 @pytest_asyncio.fixture
