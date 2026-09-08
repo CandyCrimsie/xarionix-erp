@@ -18,9 +18,11 @@ from services.company_memberships import (
     CompanyMembershipAlreadyExistsError,
     CompanyMembershipNotFoundError,
     CompanyMembershipPermissionDeniedError,
+    CompanyMembershipPrimaryUnitRequiredError,
+    CompanyMembershipUnitNotFoundError,
     CompanyNotFoundError,
     UserNotFoundError,
-    add_user_to_company,
+    add_scoped_user_to_company,
     get_scoped_company_membership,
     list_scoped_company_memberships,
     update_scoped_company_membership,
@@ -28,9 +30,6 @@ from services.company_memberships import (
 
 from core.permissions.codes import (
     PermissionCode,
-)
-from core.permissions.scopes import (
-    PermissionScope,
 )
 
 from dependencies.database import get_session
@@ -168,7 +167,6 @@ async def add_company_member_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_MANAGE,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -179,10 +177,16 @@ async def add_company_member_endpoint(
     )
 
     try:
-        return await add_user_to_company(
+        return await add_scoped_user_to_company(
             session,
             company_id=company_id,
             user_id=data.user_id,
+            current_membership_id=(
+                context.membership.id
+            ),
+            primary_unit_id=(
+                data.primary_unit_id
+            ),
         )
 
     except CompanyNotFoundError:
@@ -200,7 +204,31 @@ async def add_company_member_endpoint(
     except CompanyMembershipAlreadyExistsError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="User is already a member of this company",
+            detail=(
+                "User is already a member "
+                "of this company"
+            ),
+        )
+
+    except CompanyMembershipPrimaryUnitRequiredError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Primary unit is required "
+                "for this permission scope"
+            ),
+        )
+
+    except CompanyMembershipUnitNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organizational unit not found",
+        )
+
+    except CompanyMembershipPermissionDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied",
         )
 
 
