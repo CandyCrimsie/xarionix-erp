@@ -17,11 +17,12 @@ from schemas.company_memberships import (
 from services.company_memberships import (
     CompanyMembershipAlreadyExistsError,
     CompanyMembershipNotFoundError,
+    CompanyMembershipPermissionDeniedError,
     CompanyNotFoundError,
     UserNotFoundError,
     add_user_to_company,
     get_company_membership,
-    list_company_memberships,
+    list_scoped_company_memberships,
     update_company_membership,
 )
 
@@ -67,7 +68,6 @@ async def get_company_members_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_READ,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -78,15 +78,24 @@ async def get_company_members_endpoint(
     )
 
     try:
-        return await list_company_memberships(
+        return await list_scoped_company_memberships(
             session,
-            company_id,
+            company_id=company_id,
+            current_membership_id=(
+                context.membership.id
+            ),
         )
 
     except CompanyNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found",
+        )
+
+    except CompanyMembershipPermissionDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied",
         )
 
 
