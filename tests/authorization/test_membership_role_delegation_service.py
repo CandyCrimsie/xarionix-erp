@@ -31,6 +31,15 @@ from services.role_assignment_policy import (
     RoleAssignmentNotAllowedError,
 )
 
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
+from models.permissions import Permission
+from models.role_permissions import (
+    RolePermission,
+)
+
 
 async def create_context(
     session: AsyncSession,
@@ -134,6 +143,18 @@ async def create_context(
 
     await session.flush()
 
+    roles_assign_permission = Permission(
+        code="roles.assign",
+        name="Assign roles",
+        module="roles",
+    )
+
+    session.add(
+        roles_assign_permission
+    )
+
+    await session.flush()
+
     #
     # Actor обладает Support Manager.
     #
@@ -141,6 +162,16 @@ async def create_context(
         MembershipRole(
             company_membership_id=actor.id,
             role_id=manager.id,
+        )
+    )
+
+    session.add(
+        RolePermission(
+            role_id=manager.id,
+            permission_id=(
+                roles_assign_permission.id
+            ),
+            scope=PermissionScope.COMPANY,
         )
     )
 
