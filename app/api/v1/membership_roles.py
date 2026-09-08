@@ -93,7 +93,6 @@ async def update_membership_roles_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ROLES_ASSIGN,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
