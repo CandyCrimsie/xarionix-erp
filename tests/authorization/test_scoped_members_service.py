@@ -38,6 +38,7 @@ from services.company_memberships import (
     CompanyMembershipPermissionDeniedError,
     get_scoped_company_membership,
     list_scoped_company_memberships,
+    update_scoped_company_membership,
 )
 
 
@@ -66,6 +67,52 @@ async def create_membership(
     await session.flush()
 
     return membership
+
+
+async def create_role_with_members_manage(
+    session: AsyncSession,
+    *,
+    company: Company,
+    membership: CompanyMembership,
+    scope: PermissionScope,
+) -> None:
+    permission = Permission(
+        code="members.manage",
+        name="Manage members",
+        module="members",
+    )
+
+    role = Role(
+        company_id=company.id,
+        name=f"Manager {scope.value}",
+    )
+
+    session.add_all(
+        [
+            permission,
+            role,
+        ]
+    )
+
+    await session.flush()
+
+    session.add_all(
+        [
+            RolePermission(
+                role_id=role.id,
+                permission_id=permission.id,
+                scope=scope,
+            ),
+            MembershipRole(
+                company_membership_id=(
+                    membership.id
+                ),
+                role_id=role.id,
+            ),
+        ]
+    )
+
+    await session.flush()
 
 
 async def create_role_with_members_read(
@@ -767,5 +814,328 @@ async def test_target_service_without_permission_is_denied(
                 ctx["current"].id
             ),
         )
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_update_service_own_unit_can_update_same_unit(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    membership = (
+        await update_scoped_company_membership(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=ctx["same_unit"].id,
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            is_active=False,
+        )
+    )
+
+    assert membership.id == (
+        ctx["same_unit"].id
+    )
+    assert membership.is_active is False
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_update_service_own_unit_cannot_update_child(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipNotFoundError
+    ):
+        await update_scoped_company_membership(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["child_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            is_active=False,
+        )
+
+    assert (
+        ctx["child_unit"].is_active
+        is True
+    )
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_update_service_own_unit_tree_can_update_child(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope.OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    membership = (
+        await update_scoped_company_membership(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["child_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            is_active=False,
+        )
+    )
+
+    assert membership.id == (
+        ctx["child_unit"].id
+    )
+    assert membership.is_active is False
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_update_service_own_unit_tree_cannot_update_other_branch(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope.OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipNotFoundError
+    ):
+        await update_scoped_company_membership(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["other_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            is_active=False,
+        )
+
+    assert (
+        ctx["other_unit"].is_active
+        is True
+    )
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_update_service_company_can_update_company_member(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    membership = (
+        await update_scoped_company_membership(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["other_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            is_active=False,
+        )
+    )
+
+    assert membership.id == (
+        ctx["other_unit"].id
+    )
+    assert membership.is_active is False
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_update_service_company_cannot_cross_company(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipNotFoundError
+    ):
+        await update_scoped_company_membership(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=ctx["foreign"].id,
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            is_active=False,
+        )
+
+    assert ctx["foreign"].is_active is True
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_update_service_without_manage_permission_is_denied(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipPermissionDeniedError
+    ):
+        await update_scoped_company_membership(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["same_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            is_active=False,
+        )
+
+    assert (
+        ctx["same_unit"].is_active
+        is True
+    )
+
+    await clear_authorization_cache()
+
+
+@pytest.mark.asyncio
+async def test_update_service_read_permission_does_not_grant_manage(
+    db_session: AsyncSession,
+):
+    await clear_authorization_cache()
+
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    with pytest.raises(
+        CompanyMembershipPermissionDeniedError
+    ):
+        await update_scoped_company_membership(
+            db_session,
+            company_id=ctx["company"].id,
+            membership_id=(
+                ctx["same_unit"].id
+            ),
+            current_membership_id=(
+                ctx["current"].id
+            ),
+            is_active=False,
+        )
+
+    assert (
+        ctx["same_unit"].is_active
+        is True
+    )
 
     await clear_authorization_cache()
