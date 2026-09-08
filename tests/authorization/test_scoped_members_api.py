@@ -47,6 +47,10 @@ from services.sessions import (
     create_session,
 )
 
+from repositories.unit_memberships import (
+    get_primary_unit_id,
+)
+
 
 async def create_membership(
     session: AsyncSession,
@@ -73,6 +77,23 @@ async def create_membership(
     await session.flush()
 
     return membership
+
+
+async def create_user(
+    session: AsyncSession,
+    *,
+    username: str,
+) -> User:
+    user = User(
+        username=username,
+        password_hash="test",
+    )
+
+    session.add(user)
+
+    await session.flush()
+
+    return user
 
 
 async def create_role_with_members_read(
@@ -1393,6 +1414,570 @@ async def test_api_update_path_company_must_match_context(
         headers=headers,
         json={
             "is_active": False,
+        },
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Company not found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_create_own_unit_can_create_in_own_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="api-new-own-unit-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
+            "primary_unit_id": (
+                ctx["support"].id
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["user_id"] == user.id
+
+    membership_id = response.json()["id"]
+
+    primary_unit_id = await get_primary_unit_id(
+        db_session,
+        membership_id,
+    )
+
+    assert primary_unit_id == (
+        ctx["support"].id
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_create_own_unit_cannot_create_in_child_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="api-child-denied-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
+            "primary_unit_id": (
+                ctx["support_l1"].id
+            ),
+        },
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Organizational unit not found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_create_own_unit_requires_primary_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="api-no-unit-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
+        },
+    )
+
+    assert response.status_code == 400
+
+    assert response.json() == {
+        "detail": (
+            "Primary unit is required "
+            "for this permission scope"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_create_own_unit_tree_can_create_in_child(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="api-tree-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope.OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
+            "primary_unit_id": (
+                ctx["support_l1"].id
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+
+    primary_unit_id = await get_primary_unit_id(
+        db_session,
+        response.json()["id"],
+    )
+
+    assert primary_unit_id == (
+        ctx["support_l1"].id
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_create_own_unit_tree_cannot_create_in_other_branch(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="api-other-branch-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope.OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
+            "primary_unit_id": ctx["noc"].id,
+        },
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Organizational unit not found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_create_company_can_create_without_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="api-company-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
+        },
+    )
+
+    assert response.status_code == 201
+
+    primary_unit_id = await get_primary_unit_id(
+        db_session,
+        response.json()["id"],
+    )
+
+    assert primary_unit_id is None
+
+
+@pytest.mark.asyncio
+async def test_api_create_company_can_create_with_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="api-company-unit-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
+            "primary_unit_id": ctx["noc"].id,
+        },
+    )
+
+    assert response.status_code == 201
+
+    primary_unit_id = await get_primary_unit_id(
+        db_session,
+        response.json()["id"],
+    )
+
+    assert primary_unit_id == ctx["noc"].id
+
+
+@pytest.mark.asyncio
+async def test_api_create_company_cannot_use_foreign_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    foreign_unit = OrganizationalUnit(
+        company_id=ctx["foreign_company"].id,
+        name="Foreign Department",
+        type=(
+            OrganizationalUnitType.DEPARTMENT
+        ),
+    )
+
+    db_session.add(foreign_unit)
+
+    user = await create_user(
+        db_session,
+        username="api-foreign-unit-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
+            "primary_unit_id": foreign_unit.id,
+        },
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Organizational unit not found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_create_without_manage_permission_is_forbidden(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="api-create-denied-user",
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
+            "primary_unit_id": (
+                ctx["support"].id
+            ),
+        },
+    )
+
+    assert response.status_code == 403
+
+    assert response.json() == {
+        "detail": "Permission denied",
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_create_existing_membership_returns_conflict(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": (
+                ctx["same_unit"].user_id
+            ),
+            "primary_unit_id": (
+                ctx["support"].id
+            ),
+        },
+    )
+
+    assert response.status_code == 409
+
+    assert response.json() == {
+        "detail": (
+            "User is already a member "
+            "of this company"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_create_path_company_must_match_context(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    user = await create_user(
+        db_session,
+        username="api-path-mismatch-user",
+    )
+
+    await create_role_with_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['foreign_company'].id}/members"
+        ),
+        headers=headers,
+        json={
+            "user_id": user.id,
         },
     )
 
