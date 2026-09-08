@@ -62,7 +62,7 @@ os.environ["REDIS_PASSWORD"] = (
 os.environ["REDIS_DB"] = "0"
 
 os.environ["JWT_SECRET"] = (
-    "test-secret-key"
+    "0123456789abcdef0123456789abcdef"
 )
 os.environ["JWT_ALGORITHM"] = "HS256"
 os.environ[
