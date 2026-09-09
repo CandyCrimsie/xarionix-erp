@@ -274,20 +274,26 @@ async def test_sync_rejects_custom_role_with_system_role_name(
         custom_role
     )
 
-    await db_session.commit()
+    await db_session.flush()
 
+    #
+    # Сохраняем scalar IDs ДО rollback.
+    #
+    company_id = company.id
     custom_role_id = custom_role.id
+
+    await db_session.commit()
 
     with pytest.raises(
         SystemRoleNameConflictError
     ) as exc:
         await sync_system_roles_for_company(
             db_session,
-            company_id=company.id,
+            company_id=company_id,
         )
 
     assert exc.value.company_id == (
-        company.id
+        company_id
     )
 
     assert exc.value.role_name == (
@@ -302,7 +308,7 @@ async def test_sync_rejects_custom_role_with_system_role_name(
     system_roles = (
         await get_company_system_roles(
             db_session,
-            company_id=company.id,
+            company_id=company_id,
         )
     )
 
@@ -318,13 +324,15 @@ async def test_sync_rolls_back_partial_system_role_creation_on_conflict(
         name="Main Company",
     )
 
+    company_id = company.id
+
     #
     # Administrator будет создан первым,
     # а Company Manager вызовет конфликт.
     #
     db_session.add(
         Role(
-            company_id=company.id,
+            company_id=company_id,
             name="Company Manager",
             description="Custom role",
             is_system=False,
@@ -339,13 +347,13 @@ async def test_sync_rolls_back_partial_system_role_creation_on_conflict(
     ):
         await sync_system_roles_for_company(
             db_session,
-            company_id=company.id,
+            company_id=company_id,
         )
 
     system_roles = (
         await get_company_system_roles(
             db_session,
-            company_id=company.id,
+            company_id=company_id,
         )
     )
 
