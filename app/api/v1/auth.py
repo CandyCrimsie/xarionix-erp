@@ -27,11 +27,12 @@ from services.auth import (
     authenticate_user,
 )
 from services.sessions import (
+    SessionNotFoundError,
     create_session,
     rotate_refresh_token,
     delete_session,
     delete_user_session,
-    delete_all_user_sessions
+    delete_all_user_sessions,
 )
 
 from repositories.users import get_user_by_id
@@ -39,20 +40,15 @@ from repositories.users import get_user_by_id
 from core.config import config
 from core.security.jwt import create_access_token
 from core.security.cookies import set_refresh_cookie, delete_refresh_cookie
+from core.security.refresh import (
+    InvalidRefreshTokenError,
+)
 
 
 router = APIRouter(
     prefix="/auth",
     tags=["Auth"]
 )
-
-
-class InvalidRefreshTokenError(Exception):
-    pass
-
-
-class SessionNotFoundError(Exception):
-    pass
 
 
 @router.post(
