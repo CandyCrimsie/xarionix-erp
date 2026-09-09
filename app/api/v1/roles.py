@@ -37,6 +37,10 @@ from services.roles import (
     update_role,
 )
 
+from services.system_role_policy import (
+    SystemRoleProtectedError,
+)
+
 from services.role_delegations import (
     InvalidAssignableRolesError,
     RoleInactiveError as DelegationRoleInactiveError,
@@ -249,6 +253,15 @@ async def update_role_delegations_endpoint(
             },
         )
 
+    except SystemRoleProtectedError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "System role is managed "
+                "by the system"
+            ),
+        )
+
 
 @router.patch(
     "/{role_id}",
@@ -291,4 +304,13 @@ async def update_role_endpoint(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Role with this name already exists",
+        )
+
+    except SystemRoleProtectedError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "System role is managed "
+                "by the system"
+            ),
         )

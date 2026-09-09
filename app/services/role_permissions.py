@@ -18,6 +18,10 @@ from services.authorization import (
     invalidate_role_permissions,
 )
 
+from services.system_role_policy import (
+    ensure_role_is_mutable,
+)
+
 from schemas.role_permissions import (
     RolePermissionAssignment,
     RolePermissionResponse,
@@ -111,6 +115,10 @@ async def replace_role_permissions(
         session,
         company_id=company_id,
         role_id=role_id,
+    )
+
+    ensure_role_is_mutable(
+        role
     )
 
     permission_ids = [

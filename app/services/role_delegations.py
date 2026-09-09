@@ -14,6 +14,10 @@ from repositories.roles import (
     get_roles_by_ids,
 )
 
+from services.system_role_policy import (
+    ensure_role_is_mutable,
+)
+
 
 class RoleNotFoundError(Exception):
     pass
@@ -75,6 +79,10 @@ async def replace_role_delegations_for_role(
         or manager_role.company_id != company_id
     ):
         raise RoleNotFoundError
+
+    ensure_role_is_mutable(
+        manager_role
+    )
 
     if not manager_role.is_active:
         raise RoleInactiveError

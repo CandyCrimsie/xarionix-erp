@@ -32,6 +32,10 @@ from services.role_permissions import (
     replace_role_permissions,
 )
 
+from services.system_role_policy import (
+    SystemRoleProtectedError,
+)
+
 
 router = APIRouter(
     prefix="/roles/{role_id}/permissions",
@@ -132,4 +136,13 @@ async def update_role_permissions_endpoint(
                     exc.invalid_scopes
                 ),
             },
+        )
+
+    except SystemRoleProtectedError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "System role is managed "
+                "by the system"
+            ),
         )
