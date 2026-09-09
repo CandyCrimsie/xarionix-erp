@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     String,
@@ -26,6 +27,23 @@ class Role(Base):
             "name",
             name="uq_roles_company_name",
         ),
+
+        UniqueConstraint(
+            "company_id",
+            "system_key",
+            name="uq_roles_company_system_key",
+        ),
+
+        CheckConstraint(
+            (
+                "(is_system = true "
+                "AND system_key IS NOT NULL) "
+                "OR "
+                "(is_system = false "
+                "AND system_key IS NULL)"
+            ),
+            name="ck_roles_system_key_consistency",
+        ),
     )
 
     id: Mapped[int] = mapped_column(
@@ -47,6 +65,11 @@ class Role(Base):
     name: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
+    )
+
+    system_key: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
     )
 
     description: Mapped[str | None] = mapped_column(

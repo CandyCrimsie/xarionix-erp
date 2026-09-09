@@ -61,12 +61,14 @@ async def create_role(
     name: str,
     description: str | None,
     is_system: bool = False,
+    system_key: str | None = None,
 ) -> Role:
     role = Role(
         company_id=company_id,
         name=name,
         description=description,
         is_system=is_system,
+        system_key=system_key,
     )
 
     session.add(role)
@@ -95,3 +97,25 @@ async def get_roles_by_ids(
     return list(
         result.scalars().all()
     )
+
+
+async def get_system_role_by_key(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    system_key: str,
+) -> Role | None:
+    stmt = (
+        select(Role)
+        .where(
+            Role.company_id == company_id,
+            Role.is_system.is_(True),
+            Role.system_key == system_key,
+        )
+    )
+
+    result = await session.execute(
+        stmt
+    )
+
+    return result.scalar_one_or_none()
