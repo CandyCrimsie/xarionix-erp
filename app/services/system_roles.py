@@ -34,6 +34,11 @@ from repositories.roles import (
     get_system_role_by_key,
 )
 
+from repositories.role_delegations import (
+    get_role_delegations,
+    replace_role_delegations,
+)
+
 
 class SystemRoleCompanyNotFoundError(
     Exception
@@ -185,6 +190,54 @@ async def _sync_role_permissions(
     return True
 
 
+async def _sync_role_delegations(
+    session: AsyncSession,
+    *,
+    role: Role,
+    template: SystemRoleTemplate,
+    roles_by_key: dict[
+        str,
+        Role,
+    ],
+) -> bool:
+    current_rows = (
+        await get_role_delegations(
+            session,
+            manager_role_id=role.id,
+        )
+    )
+
+    current_role_ids = {
+        delegation.assignable_role_id
+        for delegation
+        in current_rows
+    }
+
+    desired_role_ids = {
+        roles_by_key[
+            key.value
+        ].id
+        for key
+        in template.assignable_role_keys
+    }
+
+    if (
+        current_role_ids
+        == desired_role_ids
+    ):
+        return False
+
+    await replace_role_delegations(
+        session,
+        manager_role_id=role.id,
+        assignable_role_ids=sorted(
+            desired_role_ids
+        ),
+    )
+
+    return True
+
+
 async def _sync_system_roles_for_company(
     session: AsyncSession,
     *,
@@ -317,6 +370,25 @@ async def _sync_system_roles_for_company(
         synchronized_roles.append(
             role
         )
+
+    roles_by_key = {
+        role.system_key: role
+        for role in synchronized_roles
+    }
+
+    for template in (
+        SYSTEM_ROLE_TEMPLATES
+    ):
+        role = roles_by_key[
+            template.key.value
+        ]
+
+        await _sync_role_delegations(
+            session,
+            role=role,
+            template=template,
+            roles_by_key=roles_by_key,
+        )    
 
     await session.flush()
 

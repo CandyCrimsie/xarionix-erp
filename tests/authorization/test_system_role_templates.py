@@ -219,3 +219,67 @@ def test_unknown_system_role_template_returns_none():
         )
         is None
     )
+
+
+def test_system_role_delegations_reference_existing_templates():
+    available_keys = {
+        template.key
+        for template
+        in SYSTEM_ROLE_TEMPLATES
+    }
+
+    for template in (
+        SYSTEM_ROLE_TEMPLATES
+    ):
+        assert set(
+            template.assignable_role_keys
+        ) <= available_keys
+
+
+def test_system_role_delegation_keys_are_unique():
+    for template in (
+        SYSTEM_ROLE_TEMPLATES
+    ):
+        keys = list(
+            template.assignable_role_keys
+        )
+
+        assert len(keys) == len(
+            set(keys)
+        )
+
+
+def test_default_system_role_delegation_matrix():
+    matrix = {
+        template.key: set(
+            template.assignable_role_keys
+        )
+        for template
+        in SYSTEM_ROLE_TEMPLATES
+    }
+
+    assert matrix[
+        SystemRoleKey.ADMINISTRATOR
+    ] == {
+        SystemRoleKey.ADMINISTRATOR,
+        SystemRoleKey.COMPANY_MANAGER,
+        SystemRoleKey.DEPARTMENT_MANAGER,
+        SystemRoleKey.EMPLOYEE,
+    }
+
+    assert matrix[
+        SystemRoleKey.COMPANY_MANAGER
+    ] == {
+        SystemRoleKey.DEPARTMENT_MANAGER,
+        SystemRoleKey.EMPLOYEE,
+    }
+
+    assert matrix[
+        SystemRoleKey.DEPARTMENT_MANAGER
+    ] == {
+        SystemRoleKey.EMPLOYEE,
+    }
+
+    assert matrix[
+        SystemRoleKey.EMPLOYEE
+    ] == set()
