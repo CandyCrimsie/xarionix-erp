@@ -4,6 +4,22 @@ from sqlalchemy.ext.asyncio import (
 
 from core.system_roles import (
     SYSTEM_ROLE_TEMPLATES,
+    SystemRoleTemplate,
+)
+
+from models.permissions import Permission
+
+from repositories.permissions import (
+    get_permissions,
+)
+from repositories.role_permissions import (
+    create_role_permissions,
+    delete_role_permissions,
+    get_role_permissions,
+)
+
+from services.authorization import (
+    invalidate_role_permissions,
 )
 
 from models.roles import Role
@@ -49,11 +65,134 @@ class SystemRoleNameConflictError(
         )
 
 
+class SystemRolePermissionUnavailableError(
+    Exception
+):
+    def __init__(
+        self,
+        permission_codes: list[str],
+    ) -> None:
+        self.permission_codes = (
+            permission_codes
+        )
+
+        super().__init__(
+            (
+                "System role permissions "
+                "are unavailable"
+            )
+        )
+
+
+async def _get_active_permissions_by_code(
+    session: AsyncSession,
+) -> dict[str, Permission]:
+    permissions = await get_permissions(
+        session,
+        active_only=True,
+    )
+
+    permissions_by_code = {
+        permission.code: permission
+        for permission in permissions
+    }
+
+    required_codes = {
+        item.code.value
+        for template
+        in SYSTEM_ROLE_TEMPLATES
+        for item
+        in template.permissions
+    }
+
+    missing_codes = sorted(
+        required_codes
+        - set(permissions_by_code)
+    )
+
+    if missing_codes:
+        raise (
+            SystemRolePermissionUnavailableError(
+                missing_codes
+            )
+        )
+
+    return permissions_by_code
+
+
+async def _sync_role_permissions(
+    session: AsyncSession,
+    *,
+    role: Role,
+    template: SystemRoleTemplate,
+    permissions_by_code: dict[
+        str,
+        Permission,
+    ],
+) -> bool:
+    current_rows = (
+        await get_role_permissions(
+            session,
+            role.id,
+        )
+    )
+
+    current_permissions = {
+        permission.code: scope
+        for permission, scope
+        in current_rows
+    }
+
+    desired_permissions = {
+        item.code.value: item.scope
+        for item
+        in template.permissions
+    }
+
+    #
+    # Ничего не изменилось:
+    # не трогаем строки и не инвалидируем cache.
+    #
+    if (
+        current_permissions
+        == desired_permissions
+    ):
+        return False
+
+    #
+    # Template является полным source of truth.
+    #
+    await delete_role_permissions(
+        session,
+        role.id,
+    )
+
+    await create_role_permissions(
+        session,
+        role_id=role.id,
+        permissions=[
+            (
+                permissions_by_code[
+                    code
+                ].id,
+                scope,
+            )
+            for code, scope
+            in desired_permissions.items()
+        ],
+    )
+
+    return True
+
+
 async def _sync_system_roles_for_company(
     session: AsyncSession,
     *,
     company_id: int,
-) -> list[Role]:
+) -> tuple[
+    list[Role],
+    set[int],
+]:
     company = await get_company_by_id(
         session,
         company_id,
@@ -62,9 +201,19 @@ async def _sync_system_roles_for_company(
     if company is None:
         raise SystemRoleCompanyNotFoundError
 
+    permissions_by_code = (
+        await _get_active_permissions_by_code(
+            session
+        )
+    )
+
     synchronized_roles: list[
         Role
     ] = []
+
+    authorization_changed_role_ids: set[
+        int
+    ] = set()
 
     for template in (
         SYSTEM_ROLE_TEMPLATES
@@ -75,10 +224,6 @@ async def _sync_system_roles_for_company(
             system_key=template.key.value,
         )
 
-        #
-        # Проверяем, не занято ли canonical
-        # имя другой ролью.
-        #
         role_with_template_name = (
             await get_role_by_name(
                 session,
@@ -87,12 +232,9 @@ async def _sync_system_roles_for_company(
             )
         )
 
+        role_authorization_changed = False
+
         if role is None:
-            #
-            # Обычную пользовательскую роль
-            # с таким же именем автоматически
-            # системной НЕ делаем.
-            #
             if (
                 role_with_template_name
                 is not None
@@ -121,11 +263,6 @@ async def _sync_system_roles_for_company(
             )
 
         else:
-            #
-            # Системная роль уже существует,
-            # но canonical name может быть
-            # занят другой ролью.
-            #
             if (
                 role_with_template_name
                 is not None
@@ -145,14 +282,37 @@ async def _sync_system_roles_for_company(
                 )
 
             #
-            # Template является source of truth
-            # для metadata системной роли.
+            # Reactivation влияет на authorization.
             #
+            if not role.is_active:
+                role_authorization_changed = (
+                    True
+                )
+
             role.name = template.name
             role.description = (
                 template.description
             )
             role.is_active = True
+
+        permissions_changed = (
+            await _sync_role_permissions(
+                session,
+                role=role,
+                template=template,
+                permissions_by_code=(
+                    permissions_by_code
+                ),
+            )
+        )
+
+        if (
+            role_authorization_changed
+            or permissions_changed
+        ):
+            authorization_changed_role_ids.add(
+                role.id
+            )
 
         synchronized_roles.append(
             role
@@ -160,7 +320,10 @@ async def _sync_system_roles_for_company(
 
     await session.flush()
 
-    return synchronized_roles
+    return (
+        synchronized_roles,
+        authorization_changed_role_ids,
+    )
 
 
 async def sync_system_roles_for_company(
@@ -169,7 +332,10 @@ async def sync_system_roles_for_company(
     company_id: int,
 ) -> list[Role]:
     try:
-        roles = (
+        (
+            roles,
+            changed_role_ids,
+        ) = (
             await _sync_system_roles_for_company(
                 session,
                 company_id=company_id,
@@ -183,11 +349,20 @@ async def sync_system_roles_for_company(
                 role
             )
 
-        return roles
-
     except Exception:
         await session.rollback()
         raise
+
+    #
+    # Только после успешного COMMIT.
+    #
+    for role_id in changed_role_ids:
+        await invalidate_role_permissions(
+            session,
+            role_id=role_id,
+        )
+
+    return roles
 
 
 async def sync_system_roles(
@@ -202,25 +377,46 @@ async def sync_system_roles(
         list[Role],
     ] = {}
 
+    changed_role_ids: set[int] = set()
+
     try:
         for company in companies:
-            synchronized[
-                company.id
-            ] = (
+            company_id = company.id
+
+            (
+                roles,
+                company_changed_role_ids,
+            ) = (
                 await _sync_system_roles_for_company(
                     session,
-                    company_id=company.id,
+                    company_id=company_id,
                 )
             )
 
-        #
-        # Все компании синхронизируются
-        # одной транзакцией.
-        #
+            synchronized[
+                company_id
+            ] = roles
+
+            changed_role_ids.update(
+                company_changed_role_ids
+            )
+
         await session.commit()
 
-        return synchronized
+        for roles in synchronized.values():
+            for role in roles:
+                await session.refresh(
+                    role
+                )
 
     except Exception:
         await session.rollback()
         raise
+
+    for role_id in changed_role_ids:
+        await invalidate_role_permissions(
+            session,
+            role_id=role_id,
+        )
+
+    return synchronized

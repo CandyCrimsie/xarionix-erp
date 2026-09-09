@@ -5,20 +5,12 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
-from core.permissions.scopes import (
-    PermissionScope,
-)
-
 from core.system_roles import (
     SYSTEM_ROLE_TEMPLATES,
     SystemRoleKey,
 )
 
 from models.company import Company
-from models.permissions import Permission
-from models.role_permissions import (
-    RolePermission,
-)
 from models.roles import Role
 
 from services.system_roles import (
@@ -433,82 +425,3 @@ async def test_sync_missing_company_is_rejected(
             db_session,
             company_id=999999999,
         )
-
-
-@pytest.mark.asyncio
-async def test_system_role_sync_does_not_modify_role_permissions(
-    db_session: AsyncSession,
-):
-    company = await create_company(
-        db_session,
-        name="Main Company",
-    )
-
-    await db_session.commit()
-
-    roles = (
-        await sync_system_roles_for_company(
-            db_session,
-            company_id=company.id,
-        )
-    )
-
-    employee = next(
-        role
-        for role in roles
-        if (
-            role.system_key
-            == SystemRoleKey.EMPLOYEE.value
-        )
-    )
-
-    permission = Permission(
-        code="temporary.test",
-        name="Temporary permission",
-        module="test",
-    )
-
-    db_session.add(
-        permission
-    )
-
-    await db_session.flush()
-
-    custom_role_permission = (
-        RolePermission(
-            role_id=employee.id,
-            permission_id=permission.id,
-            scope=PermissionScope.COMPANY,
-        )
-    )
-
-    db_session.add(
-        custom_role_permission
-    )
-
-    await db_session.commit()
-
-    await sync_system_roles_for_company(
-        db_session,
-        company_id=company.id,
-    )
-
-    stmt = (
-        select(RolePermission)
-        .where(
-            RolePermission.role_id
-            == employee.id,
-
-            RolePermission.permission_id
-            == permission.id,
-        )
-    )
-
-    result = await db_session.execute(
-        stmt
-    )
-
-    assert (
-        result.scalar_one_or_none()
-        is not None
-    )
