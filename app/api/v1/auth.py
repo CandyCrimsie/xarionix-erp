@@ -4,7 +4,6 @@ from fastapi import (
     HTTPException,
     Request,
     Response,
-    Depends,
     status,
 )
 
@@ -17,16 +16,14 @@ from typing import Annotated
 from dependencies.auth import get_current_user, CurrentAuth, get_current_auth
 from dependencies.database import get_session
 
-from schemas.user import UserCreate, UserResponse
+from schemas.user import UserResponse
 from schemas.auth import LoginRequest, TokenResponse
 
 from models.users import User
 
 from services.auth import (
-    UserAlreadyExistsError,
     InvalidCredentialsError,
     UserDisabledError,
-    register_user,
     authenticate_user,
 )
 from services.sessions import (
@@ -56,31 +53,6 @@ class InvalidRefreshTokenError(Exception):
 
 class SessionNotFoundError(Exception):
     pass
-
-
-@router.post(
-    "/register",
-    response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def register(
-    data: UserCreate,
-    session: AsyncSession = Depends(get_session),
-) -> UserResponse:
-    try:
-        user = await register_user(
-            session=session,
-            username=data.username,
-            password=data.password,
-        )
-
-    except UserAlreadyExistsError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User already exists",
-        )
-
-    return UserResponse.model_validate(user)
 
 
 @router.post(
