@@ -1,39 +1,81 @@
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import (
+    AsyncGenerator,
+)
+from contextlib import (
+    asynccontextmanager,
+)
 
 from fastapi import FastAPI
 
-from database.engine import initialize_database, close_database
-from database.redis import redis_client
-from database.session import session_factory
+from database.engine import (
+    close_database,
+    initialize_database,
+)
+from database.redis import (
+    redis_client,
+)
+from database.session import (
+    session_factory,
+)
 
-from services.permissions import sync_permissions
-from services.authorization import clear_authorization_cache
+from services.authorization import (
+    clear_authorization_cache,
+)
+from services.authorization_bootstrap import (
+    sync_authorization_baseline,
+)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    print("Запуск инициализации...")
+async def lifespan(
+    app: FastAPI,
+) -> AsyncGenerator[None, None]:
+    print(
+        "Запуск инициализации..."
+    )
+
     await initialize_database()
 
-    print("Добавление прав...")
-    async with session_factory() as session:
-        await sync_permissions(session)
+    #
+    # System-role synchronization может
+    # инвалидировать authorization cache,
+    # поэтому Redis проверяем заранее.
+    #
+    print(
+        "Проверка Redis..."
+    )
 
-    print("Проверка Redis...")
     await redis_client.ping()
 
-    print("Очистка кэша прав...")
+    print(
+        "Синхронизация RBAC..."
+    )
+
+    async with session_factory() as session:
+        await sync_authorization_baseline(
+            session
+        )
+
+    print(
+        "Очистка кэша прав..."
+    )
+
     await clear_authorization_cache()
 
     try:
         yield
 
     finally:
-        print("Закрываю Redis...")
+        print(
+            "Закрываю Redis..."
+        )
+
         await redis_client.aclose()
 
-        print("Закрываю Postgres...")
+        print(
+            "Закрываю Postgres..."
+        )
+
         await close_database()
 
         print(

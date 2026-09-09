@@ -11,6 +11,10 @@ from schemas.company import (
     CompanyUpdate,
 )
 
+from services.system_roles import (
+    sync_system_roles_for_company,
+)
+
 
 class CompanyNotFoundError(Exception):
     pass
@@ -100,8 +104,29 @@ async def create_new_company(
         parent_id=data.parent_id,
     )
 
-    await session.commit()
-    await session.refresh(company)
+    #
+    # create_company() уже сделал flush(),
+    # поэтому ID нам доступен до COMMIT.
+    #
+    company_id = company.id
+
+    #
+    # ВАЖНО:
+    # commit здесь самостоятельно
+    # больше не делаем.
+    #
+    # System-role service закоммитит
+    # Company + roles + permissions +
+    # delegations одной транзакцией.
+    #
+    await sync_system_roles_for_company(
+        session,
+        company_id=company_id,
+    )
+
+    await session.refresh(
+        company
+    )
 
     return company
 
