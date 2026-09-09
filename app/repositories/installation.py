@@ -68,8 +68,10 @@ async def has_company_memberships(
 async def has_active_administrator_membership(
     session: AsyncSession,
 ) -> bool:
-    stmt = select(
-        exists()
+    administrator_query = (
+        select(
+            CompanyMembership.id
+        )
         .select_from(
             CompanyMembership
         )
@@ -114,6 +116,12 @@ async def has_active_administrator_membership(
                 .ADMINISTRATOR
                 .value
             ),
+        )
+    )
+
+    stmt = select(
+        exists(
+            administrator_query
         )
     )
 
