@@ -407,7 +407,7 @@ async def sync_system_roles_for_company_in_transaction(
     set[int],
 ]:
     return (
-        await sync_system_roles_for_company_in_transaction(
+        await _sync_system_roles_for_company(
             session,
             company_id=company_id,
         )
