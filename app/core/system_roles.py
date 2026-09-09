@@ -41,22 +41,6 @@ class SystemRoleTemplate:
         ...
     ]
 
-
-@dataclass(
-    slots=True,
-    frozen=True,
-)
-class SystemRoleTemplate:
-    key: SystemRoleKey
-
-    name: str
-    description: str
-
-    permissions: tuple[
-        SystemRolePermissionTemplate,
-        ...
-    ]
-
     assignable_role_keys: tuple[
         SystemRoleKey,
         ...
@@ -238,52 +222,6 @@ EMPLOYEE_PERMISSIONS = (
 
 
 SYSTEM_ROLE_TEMPLATES = (
-    SystemRoleTemplate(
-        key=SystemRoleKey.ADMINISTRATOR,
-        name="Administrator",
-        description=(
-            "Full administrative access "
-            "within the company."
-        ),
-        permissions=(
-            ADMINISTRATOR_PERMISSIONS
-        ),
-    ),
-
-    SystemRoleTemplate(
-        key=SystemRoleKey.COMPANY_MANAGER,
-        name="Company Manager",
-        description=(
-            "Manages company structure, "
-            "employees and operational work."
-        ),
-        permissions=(
-            COMPANY_MANAGER_PERMISSIONS
-        ),
-    ),
-
-    SystemRoleTemplate(
-        key=SystemRoleKey.DEPARTMENT_MANAGER,
-        name="Department Manager",
-        description=(
-            "Manages employees and work "
-            "within the assigned unit tree."
-        ),
-        permissions=(
-            DEPARTMENT_MANAGER_PERMISSIONS
-        ),
-    ),
-
-    SystemRoleTemplate(
-        key=SystemRoleKey.EMPLOYEE,
-        name="Employee",
-        description=(
-            "Basic employee access to own "
-            "unit and personal resources."
-        ),
-        permissions=EMPLOYEE_PERMISSIONS,
-    ),
-
     SystemRoleTemplate(
         key=SystemRoleKey.ADMINISTRATOR,
         name="Administrator",
