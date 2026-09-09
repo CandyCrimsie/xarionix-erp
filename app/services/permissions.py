@@ -57,27 +57,36 @@ async def list_permissions(
     return result
 
 
-async def sync_permissions(
+async def sync_permissions_in_transaction(
     session: AsyncSession,
 ) -> None:
     existing_permissions = (
-        await get_all_permissions(session)
+        await get_all_permissions(
+            session
+        )
     )
 
     permissions_by_code = {
         permission.code: permission
-        for permission in existing_permissions
+        for permission
+        in existing_permissions
     }
 
     active_codes: set[str] = set()
 
-    for definition in PERMISSION_DEFINITIONS:
+    for definition in (
+        PERMISSION_DEFINITIONS
+    ):
         code = definition.code.value
 
-        active_codes.add(code)
-
-        existing = permissions_by_code.get(
+        active_codes.add(
             code
+        )
+
+        existing = (
+            permissions_by_code.get(
+                code
+            )
         )
 
         if existing is None:
@@ -86,20 +95,43 @@ async def sync_permissions(
                 code=code,
                 name=definition.name,
                 module=definition.module,
-                description=definition.description,
+                description=(
+                    definition.description
+                ),
             )
 
             continue
 
         existing.name = definition.name
-        existing.module = definition.module
+        existing.module = (
+            definition.module
+        )
         existing.description = (
             definition.description
         )
         existing.is_active = True
 
-    for permission in existing_permissions:
-        if permission.code not in active_codes:
+    for permission in (
+        existing_permissions
+    ):
+        if (
+            permission.code
+            not in active_codes
+        ):
             permission.is_active = False
+
+    #
+    # Нужно обязательно, потому что
+    # session работает с autoflush=False.
+    #
+    await session.flush()
+
+
+async def sync_permissions(
+    session: AsyncSession,
+) -> None:
+    await sync_permissions_in_transaction(
+        session
+    )
 
     await session.commit()

@@ -398,6 +398,22 @@ async def _sync_system_roles_for_company(
     )
 
 
+async def sync_system_roles_for_company_in_transaction(
+    session: AsyncSession,
+    *,
+    company_id: int,
+) -> tuple[
+    list[Role],
+    set[int],
+]:
+    return (
+        await sync_system_roles_for_company_in_transaction(
+            session,
+            company_id=company_id,
+        )
+    )
+
+
 async def sync_system_roles_for_company(
     session: AsyncSession,
     *,
@@ -459,7 +475,7 @@ async def sync_system_roles(
                 roles,
                 company_changed_role_ids,
             ) = (
-                await _sync_system_roles_for_company(
+                await sync_system_roles_for_company_in_transaction(
                     session,
                     company_id=company_id,
                 )

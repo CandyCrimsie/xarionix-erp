@@ -1,6 +1,7 @@
 from sqlalchemy import (
     exists,
     select,
+    text,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -8,6 +9,10 @@ from sqlalchemy.ext.asyncio import (
 
 from core.system_roles import (
     SystemRoleKey,
+)
+
+from core.installation import (
+    INSTALLATION_ADVISORY_LOCK_ID,
 )
 
 from models.company import Company
@@ -127,4 +132,24 @@ async def has_active_administrator_membership(
 
     return bool(
         await session.scalar(stmt)
+    )
+
+
+async def acquire_installation_lock(
+    session: AsyncSession,
+) -> None:
+    await session.execute(
+        text(
+            (
+                "SELECT "
+                "pg_advisory_xact_lock("
+                ":lock_id"
+                ")"
+            )
+        ),
+        {
+            "lock_id": (
+                INSTALLATION_ADVISORY_LOCK_ID
+            ),
+        },
     )
