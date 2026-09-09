@@ -10,6 +10,10 @@ from core.system_roles import (
     SystemRoleKey,
 )
 
+from services.permissions import (
+    sync_permissions,
+)
+
 from models.company import Company
 from models.roles import Role
 
@@ -70,6 +74,10 @@ async def get_company_system_roles(
 async def test_sync_creates_all_system_roles(
     db_session: AsyncSession,
 ):
+    await sync_permissions(
+        db_session
+    )
+
     company = await create_company(
         db_session,
         name="Main Company",
@@ -118,6 +126,10 @@ async def test_sync_creates_all_system_roles(
 async def test_sync_is_idempotent(
     db_session: AsyncSession,
 ):
+    await sync_permissions(
+        db_session
+    )
+
     company = await create_company(
         db_session,
         name="Main Company",
@@ -167,6 +179,10 @@ async def test_sync_is_idempotent(
 async def test_sync_restores_system_role_metadata(
     db_session: AsyncSession,
 ):
+    await sync_permissions(
+        db_session
+    )
+
     company = await create_company(
         db_session,
         name="Main Company",
@@ -249,6 +265,10 @@ async def test_sync_restores_system_role_metadata(
 async def test_sync_rejects_custom_role_with_system_role_name(
     db_session: AsyncSession,
 ):
+    await sync_permissions(
+        db_session
+    )
+
     company = await create_company(
         db_session,
         name="Main Company",
@@ -311,6 +331,10 @@ async def test_sync_rejects_custom_role_with_system_role_name(
 async def test_sync_rolls_back_partial_system_role_creation_on_conflict(
     db_session: AsyncSession,
 ):
+    await sync_permissions(
+        db_session
+    )
+
     company = await create_company(
         db_session,
         name="Main Company",
@@ -356,6 +380,10 @@ async def test_sync_rolls_back_partial_system_role_creation_on_conflict(
 async def test_sync_all_companies_creates_roles_for_each_company(
     db_session: AsyncSession,
 ):
+    await sync_permissions(
+        db_session
+    )
+
     company_a = await create_company(
         db_session,
         name="Company A",
