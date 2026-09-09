@@ -34,9 +34,7 @@ from repositories.users import (
     get_user_by_username,
 )
 
-import services.installation as (
-    installation_service
-)
+import services.installation as installation_service
 
 from services.installation import (
     InstallationInitializationResult,
