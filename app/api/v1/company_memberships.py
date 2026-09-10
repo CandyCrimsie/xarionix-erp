@@ -12,6 +12,7 @@ from schemas.company_memberships import (
     CompanyMembershipCreate,
     CompanyMembershipResponse,
     CompanyMembershipUpdate,
+    CompanyMemberSummaryResponse,
 )
 
 from services.company_memberships import (
@@ -26,6 +27,7 @@ from services.company_memberships import (
     get_scoped_company_membership,
     list_scoped_company_memberships,
     update_scoped_company_membership,
+    list_scoped_company_member_summaries,
 )
 
 from core.permissions.codes import (
@@ -51,7 +53,7 @@ router = APIRouter(
 @router.get(
     "",
     response_model=list[
-        CompanyMembershipResponse
+        CompanyMemberSummaryResponse
     ],
 )
 async def get_company_members_endpoint(
@@ -70,19 +72,21 @@ async def get_company_members_endpoint(
             )
         ),
     ],
-) -> list[CompanyMembershipResponse]:
+) -> list[CompanyMemberSummaryResponse]:
     ensure_company_matches_context(
         company_id=company_id,
         context=context,
     )
 
     try:
-        return await list_scoped_company_memberships(
-            session,
-            company_id=company_id,
-            current_membership_id=(
-                context.membership.id
-            ),
+        return (
+            await list_scoped_company_member_summaries(
+                session,
+                company_id=company_id,
+                current_membership_id=(
+                    context.membership.id
+                ),
+            )
         )
 
     except CompanyNotFoundError:

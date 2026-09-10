@@ -29,6 +29,8 @@ from repositories.company_memberships import (
     get_available_companies_for_user,
     get_scoped_company_membership_by_id,
     get_scoped_company_memberships,
+    CompanyMemberSummary,
+    get_company_member_summaries,
 )
 
 from repositories.users import (
@@ -144,6 +146,32 @@ async def list_scoped_company_memberships(
         ),
         scope=scope,
         unit_ids=unit_ids,
+    )
+
+
+async def list_scoped_company_member_summaries(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    current_membership_id: int,
+) -> list[CompanyMemberSummary]:
+    memberships = (
+        await list_scoped_company_memberships(
+            session,
+            company_id=company_id,
+            current_membership_id=(
+                current_membership_id
+            ),
+        )
+    )
+
+    return await get_company_member_summaries(
+        session,
+        [
+            membership.id
+            for membership
+            in memberships
+        ],
     )
 
 

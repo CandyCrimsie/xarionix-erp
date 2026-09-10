@@ -1986,3 +1986,107 @@ async def test_api_create_path_company_must_match_context(
     assert response.json() == {
         "detail": "Company not found",
     }
+
+
+@pytest.mark.asyncio
+async def test_api_members_returns_member_summary(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}/members"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    members = {
+        item["id"]: item
+        for item in response.json()
+    }
+
+
+    same_unit = members[
+        ctx["same_unit"].id
+    ]
+
+    assert same_unit["user_id"] == (
+        ctx["same_unit"].user_id
+    )
+
+    assert (
+        same_unit["username"]
+        == "same-unit-user"
+    )
+
+    assert (
+        same_unit["user_is_active"]
+        is True
+    )
+
+    assert (
+        same_unit["is_active"]
+        is True
+    )
+
+    assert (
+        same_unit["primary_unit_id"]
+        == ctx["support"].id
+    )
+
+    assert (
+        same_unit["primary_unit_name"]
+        == "Support"
+    )
+
+    assert (
+        same_unit["primary_unit_type"]
+        == "department"
+    )
+
+
+    without_unit = members[
+        ctx["without_unit"].id
+    ]
+
+    assert (
+        without_unit["username"]
+        == "without-unit-user"
+    )
+
+    assert (
+        without_unit["primary_unit_id"]
+        is None
+    )
+
+    assert (
+        without_unit["primary_unit_name"]
+        is None
+    )
+
+    assert (
+        without_unit["primary_unit_type"]
+        is None
+    )
