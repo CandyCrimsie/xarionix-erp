@@ -372,6 +372,36 @@ def response_membership_ids(
     }
 
 
+async def assign_test_role(
+    session: AsyncSession,
+    *,
+    company: Company,
+    membership: CompanyMembership,
+    name: str,
+) -> Role:
+    role = Role(
+        company_id=company.id,
+        name=name,
+    )
+
+    session.add(role)
+
+    await session.flush()
+
+    session.add(
+        MembershipRole(
+            company_membership_id=(
+                membership.id
+            ),
+            role_id=role.id,
+        )
+    )
+
+    await session.flush()
+
+    return role
+
+
 @pytest.mark.asyncio
 async def test_api_members_self_scope(
     db_session: AsyncSession,
@@ -2090,3 +2120,151 @@ async def test_api_members_returns_member_summary(
         without_unit["primary_unit_type"]
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_api_membership_roles_own_unit_can_read_same_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    role = await assign_test_role(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["same_unit"],
+        name="Same Unit Role",
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['same_unit'].id}/roles"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    assert {
+        item["id"]
+        for item in response.json()
+    } == {
+        role.id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_membership_roles_own_unit_cannot_read_child_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await assign_test_role(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["child_unit"],
+        name="Child Unit Role",
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['child_unit'].id}/roles"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": (
+            "Company membership not found"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_membership_roles_own_unit_tree_can_read_child_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await create_role_with_members_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope.OWN_UNIT_TREE
+        ),
+    )
+
+    role = await assign_test_role(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["child_unit"],
+        name="Child Unit Role",
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['child_unit'].id}/roles"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    assert {
+        item["id"]
+        for item in response.json()
+    } == {
+        role.id,
+    }

@@ -9,9 +9,6 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.permissions.codes import PermissionCode
-from core.permissions.scopes import (
-    PermissionScope,
-)
 
 from dependencies.authorization import require_permission
 from dependencies.company import CurrentCompanyContext
@@ -29,7 +26,7 @@ from services.membership_roles import (
     CompanyMembershipInactiveError,
     CompanyMembershipNotFoundError,
     InvalidRolesError,
-    list_membership_roles,
+    list_scoped_membership_roles,
     replace_membership_roles_with_delegation,
 )
 
@@ -56,7 +53,6 @@ async def get_membership_roles_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_READ,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -67,10 +63,15 @@ async def get_membership_roles_endpoint(
     ],
 ) -> list[RoleResponse]:
     try:
-        return await list_membership_roles(
+        return await list_scoped_membership_roles(
             session,
             company_id=context.company.id,
-            company_membership_id=company_membership_id,
+            actor_membership_id=(
+                context.membership.id
+            ),
+            company_membership_id=(
+                company_membership_id
+            ),
         )
 
     except CompanyMembershipNotFoundError:

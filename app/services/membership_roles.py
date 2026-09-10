@@ -184,6 +184,7 @@ async def _get_scoped_target_membership(
     company_id: int,
     actor_membership_id: int,
     target_membership_id: int,
+    permission: PermissionCode,
 ):
     authorization = AuthorizationService(
         session
@@ -195,9 +196,7 @@ async def _get_scoped_target_membership(
             company_membership_id=(
                 actor_membership_id
             ),
-            permission=(
-                PermissionCode.ROLES_ASSIGN
-            ),
+            permission=permission,
         )
     )
 
@@ -257,6 +256,33 @@ async def list_membership_roles(
         session,
         company_id=company_id,
         company_membership_id=company_membership_id,
+    )
+
+    return await get_membership_roles(
+        session,
+        company_membership_id,
+    )
+
+
+async def list_scoped_membership_roles(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    actor_membership_id: int,
+    company_membership_id: int,
+) -> list[Role]:
+    await _get_scoped_target_membership(
+        session,
+        company_id=company_id,
+        actor_membership_id=(
+            actor_membership_id
+        ),
+        target_membership_id=(
+            company_membership_id
+        ),
+        permission=(
+            PermissionCode.MEMBERS_READ
+        ),
     )
 
     return await get_membership_roles(
@@ -331,6 +357,9 @@ async def replace_membership_roles_with_delegation(
             ),
             target_membership_id=(
                 company_membership_id
+            ),
+            permission=(
+                PermissionCode.ROLES_ASSIGN
             ),
         )
     )
