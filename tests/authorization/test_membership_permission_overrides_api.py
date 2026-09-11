@@ -951,3 +951,92 @@ async def test_api_delete_invalidates_target_authorization_cache(
     assert restored[
         "tasks.read"
     ] == PermissionScope.SELF
+
+
+@pytest.mark.asyncio
+async def test_api_permission_override_catalog_returns_permissions(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_roles_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["actor"],
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['target'].id}"
+            f"/permission-overrides/catalog"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    permissions = response.json()
+
+    assert permissions
+
+    assert all(
+        "id" in permission
+        and "code" in permission
+        and "allowed_scopes"
+        in permission
+        for permission
+        in permissions
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_permission_override_catalog_cannot_read_foreign_membership(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_roles_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["actor"],
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['foreign_target'].id}"
+            f"/permission-overrides/catalog"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": (
+            "Company membership not found"
+        ),
+    }

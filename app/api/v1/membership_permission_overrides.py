@@ -32,6 +32,9 @@ from schemas.membership_permission_overrides import (
     MembershipPermissionOverrideResponse,
     MembershipPermissionOverrideUpdate,
 )
+from schemas.permissions import (
+    PermissionResponse,
+)
 
 from services.membership_permission_overrides import (
     CompanyMembershipInactiveError,
@@ -44,6 +47,9 @@ from services.membership_permission_overrides import (
     delete_membership_permission_override,
     list_membership_permission_overrides,
     set_membership_permission_override,
+)
+from services.permissions import (
+    list_permissions,
 )
 
 
@@ -106,6 +112,56 @@ async def get_membership_permission_overrides_endpoint(
                 "Company membership not found"
             ),
         )
+
+
+@router.get(
+    "/catalog",
+    response_model=list[
+        PermissionResponse
+    ],
+)
+async def get_membership_permission_override_catalog_endpoint(
+    company_membership_id: int,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.ROLES_MANAGE,
+                minimum_scope=(
+                    PermissionScope.COMPANY
+                ),
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> list[PermissionResponse]:
+    try:
+        await list_membership_permission_overrides(
+            session,
+            company_id=context.company.id,
+            company_membership_id=(
+                company_membership_id
+            ),
+        )
+
+    except CompanyMembershipNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=(
+                "Company membership not found"
+            ),
+        )
+
+    return await list_permissions(
+        session,
+    )
 
 
 @router.put(
