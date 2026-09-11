@@ -12,11 +12,28 @@ from repositories.organizational_units import (
     create_organizational_unit,
     get_company_organizational_units,
     get_organizational_unit_by_id,
+    get_company_organizational_units_by_ids,
 )
 
 from schemas.organizational_units import (
     OrganizationalUnitCreate,
     OrganizationalUnitUpdate,
+)
+
+from core.permissions.codes import (
+    PermissionCode,
+)
+
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
+from services.authorization import (
+    AuthorizationService,
+)
+
+from services.scopes import (
+    ScopeService,
 )
 
 
@@ -42,6 +59,66 @@ class OrganizationalUnitHierarchyCycleError(
     Exception
 ):
     pass
+
+
+class OrganizationalUnitPermissionDeniedError(
+    Exception
+):
+    pass
+
+
+async def _get_scoped_unit_ids(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    current_membership_id: int,
+    permission: PermissionCode,
+) -> set[int] | None:
+    authorization = AuthorizationService(
+        session
+    )
+
+    scope = (
+        await authorization
+            .get_permission_scope(
+                company_id=company_id,
+                company_membership_id=(
+                    current_membership_id
+                ),
+                permission=permission,
+            )
+    )
+
+    if scope is None:
+        raise (
+            OrganizationalUnitPermissionDeniedError
+        )
+
+
+    if scope == PermissionScope.COMPANY:
+        return None
+
+
+    if scope in {
+        PermissionScope.OWN_UNIT,
+        PermissionScope.OWN_UNIT_TREE,
+    }:
+        scope_service = ScopeService(
+            session
+        )
+
+        return await scope_service.get_unit_ids(
+            scope=scope,
+            company_id=company_id,
+            company_membership_id=(
+                current_membership_id
+            ),
+        )
+
+
+    raise (
+        OrganizationalUnitPermissionDeniedError
+    )
 
 
 async def _validate_parent_change(
@@ -107,6 +184,52 @@ async def list_organizational_units(
     )
 
 
+async def list_scoped_organizational_units(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    current_membership_id: int,
+) -> list[OrganizationalUnit]:
+    company = await get_company_by_id(
+        session,
+        company_id,
+    )
+
+    if company is None:
+        raise CompanyNotFoundError
+
+
+    unit_ids = await _get_scoped_unit_ids(
+        session,
+        company_id=company_id,
+        current_membership_id=(
+            current_membership_id
+        ),
+        permission=(
+            PermissionCode
+                .ORGANIZATIONAL_UNITS_READ
+        ),
+    )
+
+
+    if unit_ids is None:
+        return (
+            await get_company_organizational_units(
+                session,
+                company_id,
+            )
+        )
+
+
+    return (
+        await get_company_organizational_units_by_ids(
+            session,
+            company_id=company_id,
+            unit_ids=unit_ids,
+        )
+    )
+
+
 async def create_new_organizational_unit(
     session: AsyncSession,
     company_id: int,
@@ -162,6 +285,45 @@ async def get_organizational_unit(
         or unit.company_id != company_id
     ):
         raise OrganizationalUnitNotFoundError
+
+    return unit
+
+
+async def get_scoped_organizational_unit(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    unit_id: int,
+    current_membership_id: int,
+) -> OrganizationalUnit:
+    unit = await get_organizational_unit(
+        session,
+        company_id=company_id,
+        unit_id=unit_id,
+    )
+
+
+    unit_ids = await _get_scoped_unit_ids(
+        session,
+        company_id=company_id,
+        current_membership_id=(
+            current_membership_id
+        ),
+        permission=(
+            PermissionCode
+                .ORGANIZATIONAL_UNITS_READ
+        ),
+    )
+
+
+    if (
+        unit_ids is not None
+        and unit.id not in unit_ids
+    ):
+        raise (
+            OrganizationalUnitNotFoundError
+        )
+
 
     return unit
 

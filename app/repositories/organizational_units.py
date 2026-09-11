@@ -39,6 +39,41 @@ async def get_company_organizational_units(
     )
 
 
+async def get_company_organizational_units_by_ids(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    unit_ids: set[int],
+) -> list[OrganizationalUnit]:
+    if not unit_ids:
+        return []
+
+    stmt = (
+        select(
+            OrganizationalUnit
+        )
+        .where(
+            OrganizationalUnit.company_id
+            == company_id,
+
+            OrganizationalUnit.id.in_(
+                unit_ids
+            ),
+        )
+        .order_by(
+            OrganizationalUnit.name.asc(),
+        )
+    )
+
+    result = await session.execute(
+        stmt
+    )
+
+    return list(
+        result.scalars().all()
+    )
+
+
 async def create_organizational_unit(
     session: AsyncSession,
     *,

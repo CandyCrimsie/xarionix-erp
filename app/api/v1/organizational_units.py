@@ -24,6 +24,9 @@ from services.organizational_units import (
     get_organizational_unit,
     list_organizational_units,
     update_organizational_unit,
+    OrganizationalUnitPermissionDeniedError,
+    get_scoped_organizational_unit,
+    list_scoped_organizational_units,
 )
 
 from core.permissions.codes import (
@@ -70,7 +73,6 @@ async def get_units_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ORGANIZATIONAL_UNITS_READ,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -81,15 +83,26 @@ async def get_units_endpoint(
     )
     
     try:
-        return await list_organizational_units(
+        return await list_scoped_organizational_units(
             session,
-            company_id,
+            company_id=company_id,
+            current_membership_id=(
+                context.membership.id
+            ),
         )
 
     except CompanyNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found",
+        )
+
+    except OrganizationalUnitPermissionDeniedError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied",
         )
 
 
@@ -111,7 +124,6 @@ async def get_unit_endpoint(
         Depends(
             require_permission(
                 PermissionCode.ORGANIZATIONAL_UNITS_READ,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
@@ -122,16 +134,27 @@ async def get_unit_endpoint(
     )
     
     try:
-        return await get_organizational_unit(
+        return await get_scoped_organizational_unit(
             session,
             company_id=company_id,
             unit_id=unit_id,
+            current_membership_id=(
+                context.membership.id
+            ),
         )
 
     except OrganizationalUnitNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organizational unit not found",
+        )
+
+    except OrganizationalUnitPermissionDeniedError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied",
         )
 
 
@@ -153,8 +176,7 @@ async def create_unit_endpoint(
         CurrentCompanyContext,
         Depends(
             require_permission(
-                PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
-                minimum_scope=PermissionScope.COMPANY,
+                PermissionCode.ORGANIZATIONAL_UNITS_READ,
             )
         ),
     ],
@@ -211,8 +233,7 @@ async def update_unit_endpoint(
         CurrentCompanyContext,
         Depends(
             require_permission(
-                PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
-                minimum_scope=PermissionScope.COMPANY,
+                PermissionCode.ORGANIZATIONAL_UNITS_READ,
             )
         ),
     ],
