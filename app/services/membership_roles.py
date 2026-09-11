@@ -28,6 +28,7 @@ from services.scopes import (
 
 from services.role_assignment_policy import (
     ensure_role_changes_are_delegated,
+    get_membership_assignable_role_ids
 )
 
 from core.permissions.codes import (
@@ -288,6 +289,82 @@ async def list_scoped_membership_roles(
     return await get_membership_roles(
         session,
         company_membership_id,
+    )
+
+
+async def list_assignable_roles_for_membership(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    actor_membership_id: int,
+    company_membership_id: int,
+) -> list[Role]:
+    actor_membership = (
+        await _get_company_membership(
+            session,
+            company_id=company_id,
+            company_membership_id=(
+                actor_membership_id
+            ),
+        )
+    )
+
+    if not actor_membership.is_active:
+        raise CompanyMembershipInactiveError
+
+
+    target_membership = (
+        await _get_scoped_target_membership(
+            session,
+            company_id=company_id,
+            actor_membership_id=(
+                actor_membership_id
+            ),
+            target_membership_id=(
+                company_membership_id
+            ),
+            permission=(
+                PermissionCode.ROLES_ASSIGN
+            ),
+        )
+    )
+
+    if not target_membership.is_active:
+        raise CompanyMembershipInactiveError
+
+
+    assignable_role_ids = (
+        await get_membership_assignable_role_ids(
+            session,
+            company_id=company_id,
+            company_membership_id=(
+                actor_membership_id
+            ),
+        )
+    )
+
+    roles = await get_roles_by_ids(
+        session,
+        sorted(
+            assignable_role_ids
+        ),
+    )
+
+
+    return sorted(
+        [
+            role
+            for role in roles
+            if (
+                role.company_id
+                == company_id
+                and role.is_active
+            )
+        ],
+        key=lambda role: (
+            role.name.casefold(),
+            role.id,
+        ),
     )
 
 

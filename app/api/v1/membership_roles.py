@@ -27,6 +27,7 @@ from services.membership_roles import (
     CompanyMembershipNotFoundError,
     InvalidRolesError,
     list_scoped_membership_roles,
+    list_assignable_roles_for_membership,
     replace_membership_roles_with_delegation,
 )
 
@@ -78,6 +79,58 @@ async def get_membership_roles_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company membership not found",
+        )
+
+
+@router.get(
+    "/assignable",
+    response_model=list[RoleResponse],
+)
+async def get_assignable_membership_roles_endpoint(
+    company_membership_id: int,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.ROLES_ASSIGN,
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> list[RoleResponse]:
+    try:
+        return await (
+            list_assignable_roles_for_membership(
+                session,
+                company_id=context.company.id,
+                actor_membership_id=(
+                    context.membership.id
+                ),
+                company_membership_id=(
+                    company_membership_id
+                ),
+            )
+        )
+
+    except CompanyMembershipNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "Company membership not found"
+            ),
+        )
+
+    except CompanyMembershipInactiveError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Company membership is inactive"
+            ),
         )
 
 

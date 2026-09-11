@@ -725,3 +725,144 @@ async def test_api_unit_scope_without_actor_primary_unit_cannot_assign(
     assert response.json() == {
         "detail": "Company membership not found",
     }
+
+
+@pytest.mark.asyncio
+async def test_api_assignable_roles_own_unit_can_read_same_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session,
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['same_unit_target'].id}"
+            f"/roles/assignable"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    assert {
+        role["id"]
+        for role in response.json()
+    } == {
+        ctx["trainee"].id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_assignable_roles_own_unit_cannot_read_child(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session,
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['child_target'].id}"
+            f"/roles/assignable"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": (
+            "Company membership not found"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_assignable_roles_without_permission_is_forbidden(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session,
+        scope=None,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['same_unit_target'].id}"
+            f"/roles/assignable"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+    assert response.json() == {
+        "detail": "Permission denied",
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_assignable_roles_excludes_inactive_role(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session,
+        scope=PermissionScope.COMPANY,
+    )
+
+    ctx["trainee"].is_active = False
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['same_unit_target'].id}"
+            f"/roles/assignable"
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == []
