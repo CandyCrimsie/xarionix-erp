@@ -2,9 +2,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.unit_memberships import UnitMembership
+from models.company_memberships import (
+    CompanyMembership,
+)
 
 from repositories.company_memberships import (
     get_company_membership_by_id,
+    get_scoped_company_membership_by_id,
 )
 
 from repositories.organizational_units import (
@@ -17,6 +21,21 @@ from repositories.unit_memberships import (
     get_membership_units,
     get_unit_membership,
     get_unit_membership_by_id,
+)
+
+from core.permissions.codes import (
+    PermissionCode,
+)
+from core.permissions.scopes import (
+    PermissionScope,
+)
+
+
+from services.authorization import (
+    AuthorizationService,
+)
+from services.scopes import (
+    ScopeService,
 )
 
 
@@ -39,6 +58,84 @@ class UnitMembershipNotFoundError(Exception):
 class UnitMembershipAlreadyExistsError(Exception):
     pass
 
+class UnitMembershipPermissionDeniedError(
+    Exception
+):
+    pass
+
+
+async def _get_scoped_company_membership(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    company_membership_id: int,
+    current_membership_id: int,
+    permission: PermissionCode,
+) -> CompanyMembership:
+    authorization = AuthorizationService(
+        session
+    )
+
+    scope = (
+        await authorization
+            .get_permission_scope(
+                company_id=company_id,
+                company_membership_id=(
+                    current_membership_id
+                ),
+                permission=permission,
+            )
+    )
+
+    if scope is None:
+        raise (
+            UnitMembershipPermissionDeniedError
+        )
+
+
+    unit_ids: set[int] | None = None
+
+    if scope in {
+        PermissionScope.OWN_UNIT,
+        PermissionScope.OWN_UNIT_TREE,
+    }:
+        scope_service = ScopeService(
+            session
+        )
+
+        unit_ids = (
+            await scope_service
+                .get_unit_ids(
+                    scope=scope,
+                    company_id=company_id,
+                    company_membership_id=(
+                        current_membership_id
+                    ),
+                )
+        )
+
+
+    membership = (
+        await get_scoped_company_membership_by_id(
+            session,
+            company_id=company_id,
+            membership_id=(
+                company_membership_id
+            ),
+            current_membership_id=(
+                current_membership_id
+            ),
+            scope=scope,
+            unit_ids=unit_ids,
+        )
+    )
+
+    if membership is None:
+        raise CompanyMembershipNotFoundError
+
+
+    return membership
+
 
 async def list_membership_units(
     session: AsyncSession,
@@ -50,6 +147,33 @@ async def list_membership_units(
         session,
         company_id=company_id,
         company_membership_id=company_membership_id,
+    )
+
+    return await get_membership_units(
+        session,
+        company_membership_id,
+    )
+
+
+async def list_scoped_membership_units(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    company_membership_id: int,
+    current_membership_id: int,
+) -> list[UnitMembership]:
+    await _get_scoped_company_membership(
+        session,
+        company_id=company_id,
+        company_membership_id=(
+            company_membership_id
+        ),
+        current_membership_id=(
+            current_membership_id
+        ),
+        permission=(
+            PermissionCode.MEMBERS_READ
+        ),
     )
 
     return await get_membership_units(
@@ -141,6 +265,48 @@ async def get_membership_unit(
         != company_membership_id
     ):
         raise UnitMembershipNotFoundError
+
+    return unit_membership
+
+
+async def get_scoped_membership_unit(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    company_membership_id: int,
+    unit_membership_id: int,
+    current_membership_id: int,
+) -> UnitMembership:
+    await _get_scoped_company_membership(
+        session,
+        company_id=company_id,
+        company_membership_id=(
+            company_membership_id
+        ),
+        current_membership_id=(
+            current_membership_id
+        ),
+        permission=(
+            PermissionCode.MEMBERS_READ
+        ),
+    )
+
+
+    unit_membership = (
+        await get_unit_membership_by_id(
+            session,
+            unit_membership_id,
+        )
+    )
+
+    if (
+        unit_membership is None
+        or unit_membership
+            .company_membership_id
+        != company_membership_id
+    ):
+        raise UnitMembershipNotFoundError
+
 
     return unit_membership
 

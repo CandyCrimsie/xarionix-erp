@@ -24,6 +24,9 @@ from services.unit_memberships import (
     get_membership_unit,
     list_membership_units,
     update_membership_unit,
+    UnitMembershipPermissionDeniedError,
+    get_scoped_membership_unit,
+    list_scoped_membership_units,
 )
 
 from core.permissions.codes import (
@@ -69,22 +72,34 @@ async def get_membership_units_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_READ,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
 ) -> list[UnitMembershipResponse]:
     try:
-        return await list_membership_units(
+        return await list_scoped_membership_units(
             session,
             company_id=context.company.id,
-            company_membership_id=company_membership_id,
+            company_membership_id=(
+                company_membership_id
+            ),
+            current_membership_id=(
+                context.membership.id
+            ),
         )
 
     except CompanyMembershipNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company membership not found",
+        )
+
+    except UnitMembershipPermissionDeniedError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied",
         )
 
 
@@ -170,17 +185,23 @@ async def get_membership_unit_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_READ,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
 ) -> UnitMembershipResponse:
     try:
-        return await get_membership_unit(
+        return await get_scoped_membership_unit(
             session,
             company_id=context.company.id,
-            company_membership_id=company_membership_id,
-            unit_membership_id=unit_membership_id,
+            company_membership_id=(
+                company_membership_id
+            ),
+            unit_membership_id=(
+                unit_membership_id
+            ),
+            current_membership_id=(
+                context.membership.id
+            ),
         )
 
     except (
@@ -190,6 +211,14 @@ async def get_membership_unit_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Unit membership not found",
+        )
+
+    except UnitMembershipPermissionDeniedError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied",
         )
 
 
