@@ -27,6 +27,8 @@ from services.unit_memberships import (
     UnitMembershipPermissionDeniedError,
     get_scoped_membership_unit,
     list_scoped_membership_units,
+    add_scoped_membership_to_unit,
+    update_scoped_membership_unit,
 )
 
 from core.permissions.codes import (
@@ -122,16 +124,20 @@ async def add_membership_unit_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_MANAGE,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
 ) -> UnitMembershipResponse:
     try:
-        return await add_membership_to_unit(
+        return await add_scoped_membership_to_unit(
             session,
             company_id=context.company.id,
-            company_membership_id=company_membership_id,
+            company_membership_id=(
+                company_membership_id
+            ),
+            current_membership_id=(
+                context.membership.id
+            ),
             unit_id=data.unit_id,
             is_primary=data.is_primary,
         )
@@ -164,6 +170,14 @@ async def add_membership_unit_endpoint(
                 "Membership is already assigned "
                 "to this organizational unit"
             ),
+        )
+
+    except UnitMembershipPermissionDeniedError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied",
         )
 
 
@@ -247,11 +261,18 @@ async def update_membership_unit_endpoint(
     ],
 ) -> UnitMembershipResponse:
     try:
-        return await update_membership_unit(
+        return await update_scoped_membership_unit(
             session,
             company_id=context.company.id,
-            company_membership_id=company_membership_id,
-            unit_membership_id=unit_membership_id,
+            company_membership_id=(
+                company_membership_id
+            ),
+            unit_membership_id=(
+                unit_membership_id
+            ),
+            current_membership_id=(
+                context.membership.id
+            ),
             is_primary=data.is_primary,
             is_active=data.is_active,
         )
@@ -263,4 +284,22 @@ async def update_membership_unit_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Unit membership not found",
+        )
+
+    except OrganizationalUnitNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=(
+                "Organizational unit not found"
+            ),
+        )
+
+    except UnitMembershipPermissionDeniedError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied",
         )
