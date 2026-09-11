@@ -963,12 +963,6 @@ async def test_api_permission_override_catalog_returns_permissions(
         db_session
     )
 
-    await grant_roles_manage(
-        db_session,
-        company=ctx["company"],
-        membership=ctx["actor"],
-    )
-
     await db_session.commit()
 
     headers = await create_auth_headers(
@@ -1009,12 +1003,6 @@ async def test_api_permission_override_catalog_cannot_read_foreign_membership(
 ):
     ctx = await create_context(
         db_session
-    )
-
-    await grant_roles_manage(
-        db_session,
-        company=ctx["company"],
-        membership=ctx["actor"],
     )
 
     await db_session.commit()
