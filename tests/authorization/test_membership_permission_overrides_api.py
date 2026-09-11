@@ -1028,3 +1028,223 @@ async def test_api_permission_override_catalog_cannot_read_foreign_membership(
             "Company membership not found"
         ),
     }
+
+
+@pytest.mark.asyncio
+async def test_api_effective_permissions_returns_role_permissions(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['target'].id}"
+            f"/permission-overrides/effective"
+        ),
+        headers=headers,
+    )
+
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+
+    assert (
+        "tasks.read"
+        in data["permissions"]
+    )
+
+    assert (
+        data["scopes"][
+            "tasks.read"
+        ]
+        == "self"
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_effective_permissions_reflects_allow_override(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+
+    before = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['target'].id}"
+            f"/permission-overrides/effective"
+        ),
+        headers=headers,
+    )
+
+    assert before.status_code == 200
+
+    assert (
+        before.json()["scopes"][
+            "tasks.read"
+        ]
+        == "self"
+    )
+
+
+    override = await api_client.put(
+        override_url(
+            membership_id=(
+                ctx["target"].id
+            ),
+            permission_id=(
+                ctx["tasks_read"].id
+            ),
+        ),
+        headers=headers,
+        json={
+            "effect": "allow",
+            "scope": "company",
+        },
+    )
+
+    assert override.status_code == 200
+
+
+    after = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['target'].id}"
+            f"/permission-overrides/effective"
+        ),
+        headers=headers,
+    )
+
+    assert after.status_code == 200
+
+    assert (
+        after.json()["scopes"][
+            "tasks.read"
+        ]
+        == "company"
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_effective_permissions_reflects_deny_override(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+
+    response = await api_client.put(
+        override_url(
+            membership_id=(
+                ctx["target"].id
+            ),
+            permission_id=(
+                ctx["tasks_read"].id
+            ),
+        ),
+        headers=headers,
+        json={
+            "effect": "deny",
+            "scope": None,
+        },
+    )
+
+    assert response.status_code == 200
+
+
+    effective = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['target'].id}"
+            f"/permission-overrides/effective"
+        ),
+        headers=headers,
+    )
+
+    assert effective.status_code == 200
+
+    data = effective.json()
+
+
+    assert (
+        "tasks.read"
+        not in data["permissions"]
+    )
+
+    assert (
+        "tasks.read"
+        not in data["scopes"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_effective_permissions_cannot_read_foreign_membership(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/members/"
+            f"{ctx['foreign_target'].id}"
+            f"/permission-overrides/effective"
+        ),
+        headers=headers,
+    )
+
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": (
+            "Company membership not found"
+        ),
+    }

@@ -35,6 +35,9 @@ from schemas.membership_permission_overrides import (
 from schemas.permissions import (
     PermissionResponse,
 )
+from schemas.authorization import (
+    EffectivePermissionsResponse,
+)
 
 from services.membership_permission_overrides import (
     CompanyMembershipInactiveError,
@@ -50,6 +53,9 @@ from services.membership_permission_overrides import (
 )
 from services.permissions import (
     list_permissions,
+)
+from services.authorization import (
+    AuthorizationService,
 )
 
 
@@ -161,6 +167,86 @@ async def get_membership_permission_override_catalog_endpoint(
 
     return await list_permissions(
         session,
+    )
+
+
+@router.get(
+    "/effective",
+    response_model=(
+        EffectivePermissionsResponse
+    ),
+)
+async def get_membership_effective_permissions_endpoint(
+    company_membership_id: int,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.ROLES_MANAGE,
+                minimum_scope=(
+                    PermissionScope.COMPANY
+                ),
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> EffectivePermissionsResponse:
+    try:
+        await list_membership_permission_overrides(
+            session,
+            company_id=context.company.id,
+            company_membership_id=(
+                company_membership_id
+            ),
+        )
+
+    except CompanyMembershipNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=(
+                "Company membership not found"
+            ),
+        )
+
+
+    authorization = AuthorizationService(
+        session,
+    )
+
+    effective = (
+        await authorization
+            .get_effective_permissions(
+                company_id=(
+                    context.company.id
+                ),
+                company_membership_id=(
+                    company_membership_id
+                ),
+            )
+    )
+
+
+    return EffectivePermissionsResponse(
+        permissions=sorted(
+            effective.keys()
+        ),
+
+        scopes={
+            code:
+                effective[code]
+
+            for code
+            in sorted(
+                effective
+            )
+        },
     )
 
 
