@@ -835,7 +835,7 @@ async def test_api_assignable_roles_without_permission_is_forbidden(
 
 
 @pytest.mark.asyncio
-async def test_api_assignable_roles_excludes_inactive_role(
+async def test_api_assignable_roles_includes_delegated_inactive_role(
     db_session: AsyncSession,
     api_client: AsyncClient,
     clean_test_redis,
@@ -865,4 +865,130 @@ async def test_api_assignable_roles_excludes_inactive_role(
 
     assert response.status_code == 200
 
-    assert response.json() == []
+    assert len(
+        response.json()
+    ) == 1
+
+    role = response.json()[0]
+
+    assert role["id"] == (
+        ctx["trainee"].id
+    )
+
+    assert (
+        role["is_active"]
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_role_assignment_preserves_existing_inactive_role(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session,
+        scope=PermissionScope.COMPANY,
+    )
+
+    legacy_role = Role(
+        company_id=ctx["company"].id,
+        name="Legacy Role",
+        is_active=False,
+    )
+
+    db_session.add(
+        legacy_role
+    )
+
+    await db_session.flush()
+
+    db_session.add(
+        MembershipRole(
+            company_membership_id=(
+                ctx[
+                    "same_unit_target"
+                ].id
+            ),
+            role_id=legacy_role.id,
+        )
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.put(
+        (
+            f"/api/v1/members/"
+            f"{ctx['same_unit_target'].id}"
+            f"/roles"
+        ),
+        headers=headers,
+        json={
+            "role_ids": [
+                legacy_role.id,
+                ctx["trainee"].id,
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+
+    assert {
+        role["id"]
+        for role in response.json()
+    } == {
+        legacy_role.id,
+        ctx["trainee"].id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_role_assignment_cannot_add_inactive_role(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session,
+        scope=PermissionScope.COMPANY,
+    )
+
+    ctx["trainee"].is_active = False
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["actor"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.put(
+        (
+            f"/api/v1/members/"
+            f"{ctx['same_unit_target'].id}"
+            f"/roles"
+        ),
+        headers=headers,
+        json={
+            "role_ids": [
+                ctx["trainee"].id,
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+
+    assert response.json() == {
+        "detail": {
+            "message": "Invalid roles",
+            "role_ids": [
+                ctx["trainee"].id,
+            ],
+        },
+    }

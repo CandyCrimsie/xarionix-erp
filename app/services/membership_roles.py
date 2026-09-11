@@ -81,11 +81,19 @@ async def _validate_role_ids(
     *,
     company_id: int,
     role_ids: list[int],
+    allowed_inactive_role_ids: (
+        set[int] | None
+    ) = None,
 ) -> list[int]:
     normalized_role_ids = (
         _normalize_role_ids(
             role_ids
         )
+    )
+
+    allowed_inactive_role_ids = (
+        allowed_inactive_role_ids
+        or set()
     )
 
     roles = await get_roles_by_ids(
@@ -104,10 +112,20 @@ async def _validate_role_ids(
         if (
             role_id not in roles_by_id
             or (
-                roles_by_id[role_id].company_id
+                roles_by_id[
+                    role_id
+                ].company_id
                 != company_id
             )
-            or not roles_by_id[role_id].is_active
+            or (
+                not roles_by_id[
+                    role_id
+                ].is_active
+                and role_id
+                not in (
+                    allowed_inactive_role_ids
+                )
+            )
         )
     ]
 
@@ -358,7 +376,6 @@ async def list_assignable_roles_for_membership(
             if (
                 role.company_id
                 == company_id
-                and role.is_active
             )
         ],
         key=lambda role: (
@@ -444,14 +461,6 @@ async def replace_membership_roles_with_delegation(
     if not target_membership.is_active:
         raise CompanyMembershipInactiveError
 
-    normalized_role_ids = (
-        await _validate_role_ids(
-            session,
-            company_id=company_id,
-            role_ids=role_ids,
-        )
-    )
-
     current_roles = await get_membership_roles(
         session,
         company_membership_id,
@@ -461,6 +470,17 @@ async def replace_membership_roles_with_delegation(
         role.id
         for role in current_roles
     }
+
+    normalized_role_ids = (
+        await _validate_role_ids(
+            session,
+            company_id=company_id,
+            role_ids=role_ids,
+            allowed_inactive_role_ids=(
+                current_role_ids
+            ),
+        )
+    )
 
     requested_role_ids = set(
         normalized_role_ids
