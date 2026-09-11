@@ -218,6 +218,61 @@ async def grant_units_read(
     await session.flush()
 
 
+async def grant_units_manage(
+    session: AsyncSession,
+    *,
+    company: Company,
+    membership: CompanyMembership,
+    scope: PermissionScope,
+) -> None:
+    permission = Permission(
+        code=(
+            "organizational_units.manage"
+        ),
+        name="Manage units",
+        module="organizational_units",
+    )
+
+    role = Role(
+        company_id=company.id,
+        name=(
+            f"Unit Manager "
+            f"{scope.value}"
+        ),
+    )
+
+    session.add_all(
+        [
+            permission,
+            role,
+        ]
+    )
+
+    await session.flush()
+
+
+    session.add_all(
+        [
+            RolePermission(
+                role_id=role.id,
+                permission_id=(
+                    permission.id
+                ),
+                scope=scope,
+            ),
+
+            MembershipRole(
+                company_membership_id=(
+                    membership.id
+                ),
+                role_id=role.id,
+            ),
+        ]
+    )
+
+    await session.flush()
+
+
 async def create_auth_headers(
     *,
     user_id: int,
@@ -534,3 +589,390 @@ async def test_api_units_without_permission_is_forbidden(
     assert response.json() == {
         "detail": "Permission denied",
     }
+
+
+@pytest.mark.asyncio
+async def test_api_units_own_unit_can_update_own_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support'].id}"
+        ),
+        headers=headers,
+        json={
+            "name":
+                "Support Updated",
+        },
+    )
+
+    assert response.status_code == 200
+
+    assert (
+        response.json()["name"]
+        == "Support Updated"
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_units_own_unit_cannot_update_child(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support_l1'].id}"
+        ),
+        headers=headers,
+        json={
+            "name":
+                "Should Not Change",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_units_own_unit_cannot_create_child(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units"
+        ),
+        headers=headers,
+        json={
+            "name": "Support L2",
+            "type": "team",
+            "parent_id":
+                ctx["support"].id,
+        },
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_api_units_tree_can_create_inside_tree(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units"
+        ),
+        headers=headers,
+        json={
+            "name": "Support L2",
+            "type": "team",
+            "parent_id":
+                ctx["support"].id,
+        },
+    )
+
+    assert response.status_code == 201
+
+    assert (
+        response.json()["parent_id"]
+        == ctx["support"].id
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_units_tree_cannot_create_outside_tree(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units"
+        ),
+        headers=headers,
+        json={
+            "name": "NOC L1",
+            "type": "team",
+            "parent_id":
+                ctx["noc"].id,
+        },
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_units_tree_cannot_move_unit_outside_tree(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support_l1'].id}"
+        ),
+        headers=headers,
+        json={
+            "parent_id":
+                ctx["noc"].id,
+        },
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_units_read_permission_cannot_mutate(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support'].id}"
+        ),
+        headers=headers,
+        json={
+            "name":
+                "Illegal Update",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_api_units_company_scope_can_create_root(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units"
+        ),
+        headers=headers,
+        json={
+            "name": "Marketing",
+            "type": "department",
+            "parent_id": None,
+        },
+    )
+
+    assert response.status_code == 201
+
+    assert (
+        response.json()["parent_id"]
+        is None
+    )

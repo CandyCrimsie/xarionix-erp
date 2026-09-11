@@ -20,20 +20,17 @@ from services.organizational_units import (
     OrganizationalUnitNotFoundError,
     ParentOrganizationalUnitNotFoundError,
     ParentOrganizationalUnitWrongCompanyError,
-    create_new_organizational_unit,
     get_organizational_unit,
     list_organizational_units,
-    update_organizational_unit,
     OrganizationalUnitPermissionDeniedError,
     get_scoped_organizational_unit,
     list_scoped_organizational_units,
+    create_scoped_organizational_unit,
+    update_scoped_organizational_unit,
 )
 
 from core.permissions.codes import (
     PermissionCode,
-)
-from core.permissions.scopes import (
-    PermissionScope,
 )
 
 from dependencies.database import (
@@ -176,7 +173,7 @@ async def create_unit_endpoint(
         CurrentCompanyContext,
         Depends(
             require_permission(
-                PermissionCode.ORGANIZATIONAL_UNITS_READ,
+                PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
             )
         ),
     ],
@@ -187,10 +184,13 @@ async def create_unit_endpoint(
     )
 
     try:
-        return await create_new_organizational_unit(
+        return await create_scoped_organizational_unit(
             session,
-            company_id,
-            data,
+            company_id=company_id,
+            current_membership_id=(
+                context.membership.id
+            ),
+            data=data,
         )
 
     except CompanyNotFoundError:
@@ -214,6 +214,24 @@ async def create_unit_endpoint(
             ),
         )
 
+    except OrganizationalUnitNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=(
+                "Organizational unit not found"
+            ),
+        )
+
+    except OrganizationalUnitPermissionDeniedError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied",
+        )
+
 
 @router.patch(
     "/{unit_id}",
@@ -233,7 +251,7 @@ async def update_unit_endpoint(
         CurrentCompanyContext,
         Depends(
             require_permission(
-                PermissionCode.ORGANIZATIONAL_UNITS_READ,
+                PermissionCode.ORGANIZATIONAL_UNITS_MANAGE,
             )
         ),
     ],
@@ -244,10 +262,13 @@ async def update_unit_endpoint(
     )
     
     try:
-        return await update_organizational_unit(
+        return await update_scoped_organizational_unit(
             session,
             company_id=company_id,
             unit_id=unit_id,
+            current_membership_id=(
+                context.membership.id
+            ),
             data=data,
         )
 
@@ -276,4 +297,12 @@ async def update_unit_endpoint(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Organizational unit hierarchy cycle detected",
+        )
+
+    except OrganizationalUnitPermissionDeniedError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied",
         )
