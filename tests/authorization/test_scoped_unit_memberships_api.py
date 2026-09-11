@@ -981,3 +981,46 @@ async def test_api_unit_memberships_read_only_cannot_mutate(
     )
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_api_unit_memberships_tree_can_patch_inside_scope(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_members_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=ctx["current"].user_id,
+        company_id=ctx["company"].id,
+    )
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/company-memberships/"
+            f"{ctx['same_unit'].id}/units/"
+            f"{ctx['same_unit_assignment'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_active"] is True

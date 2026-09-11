@@ -507,7 +507,16 @@ async def update_membership_unit(
         unit_membership.is_active = True
 
     await session.commit()
-    await session.refresh(unit_membership)
+    await session.refresh(
+        unit_membership
+    )
+
+    await invalidate_membership_permissions(
+        company_id=company_id,
+        company_membership_id=(
+            company_membership_id
+        ),
+    )
 
     return unit_membership
 

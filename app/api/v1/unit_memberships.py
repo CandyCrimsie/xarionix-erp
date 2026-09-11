@@ -20,10 +20,6 @@ from services.unit_memberships import (
     OrganizationalUnitWrongCompanyError,
     UnitMembershipAlreadyExistsError,
     UnitMembershipNotFoundError,
-    add_membership_to_unit,
-    get_membership_unit,
-    list_membership_units,
-    update_membership_unit,
     UnitMembershipPermissionDeniedError,
     get_scoped_membership_unit,
     list_scoped_membership_units,
@@ -33,9 +29,6 @@ from services.unit_memberships import (
 
 from core.permissions.codes import (
     PermissionCode,
-)
-from core.permissions.scopes import (
-    PermissionScope,
 )
 
 from dependencies.database import (
@@ -255,7 +248,6 @@ async def update_membership_unit_endpoint(
         Depends(
             require_permission(
                 PermissionCode.MEMBERS_MANAGE,
-                minimum_scope=PermissionScope.COMPANY,
             )
         ),
     ],
