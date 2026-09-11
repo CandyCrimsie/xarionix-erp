@@ -73,14 +73,6 @@ async def create_context(
         ),
     )
 
-    support_l1 = OrganizationalUnit(
-        company_id=company.id,
-        name="Support L1",
-        type=(
-            OrganizationalUnitType.TEAM
-        ),
-    )
-
     noc = OrganizationalUnit(
         company_id=company.id,
         name="NOC",
@@ -93,16 +85,27 @@ async def create_context(
     session.add_all(
         [
             support,
-            support_l1,
             noc,
         ]
     )
 
     await session.flush()
 
-    support_l1.parent_id = (
-        support.id
+
+    support_l1 = OrganizationalUnit(
+        company_id=company.id,
+        parent_id=support.id,
+        name="Support L1",
+        type=(
+            OrganizationalUnitType.TEAM
+        ),
     )
+
+    session.add(
+        support_l1
+    )
+
+    await session.flush()
 
 
     user = User(
