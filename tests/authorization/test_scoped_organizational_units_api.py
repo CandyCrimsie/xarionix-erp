@@ -1205,3 +1205,223 @@ async def test_api_manageable_units_requires_manage_permission(
 
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_api_units_tree_keeps_inactive_child_manageable(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    ctx["support_l1"].is_active = False
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/manageable"
+        ),
+        headers=headers,
+    )
+
+
+    assert response.status_code == 200
+
+    assert unit_ids(
+        response
+    ) == {
+        ctx["support"].id,
+        ctx["support_l1"].id,
+    }
+
+
+    child = next(
+        item
+        for item
+        in response.json()
+        if (
+            item["id"]
+            == ctx["support_l1"].id
+        )
+    )
+
+    assert (
+        child["is_active"]
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_units_tree_can_reactivate_inactive_child(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    ctx["support_l1"].is_active = False
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support_l1'].id}"
+        ),
+        headers=headers,
+        json={
+            "is_active":
+                True,
+        },
+    )
+
+
+    assert response.status_code == 200
+
+    assert (
+        response.json()["is_active"]
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_units_tree_manager_can_reactivate_own_inactive_root(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    deactivate_response = (
+        await api_client.patch(
+            (
+                f"/api/v1/companies/"
+                f"{ctx['company'].id}"
+                f"/units/"
+                f"{ctx['support'].id}"
+            ),
+            headers=headers,
+            json={
+                "is_active":
+                    False,
+            },
+        )
+    )
+
+
+    assert (
+        deactivate_response.status_code
+        == 200
+    )
+
+    assert (
+        deactivate_response
+            .json()["is_active"]
+        is False
+    )
+
+
+    reactivate_response = (
+        await api_client.patch(
+            (
+                f"/api/v1/companies/"
+                f"{ctx['company'].id}"
+                f"/units/"
+                f"{ctx['support'].id}"
+            ),
+            headers=headers,
+            json={
+                "is_active":
+                    True,
+            },
+        )
+    )
+
+
+    assert (
+        reactivate_response.status_code
+        == 200
+    )
+
+    assert (
+        reactivate_response
+            .json()["is_active"]
+        is True
+    )

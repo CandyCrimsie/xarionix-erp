@@ -112,8 +112,6 @@ async def get_unit_tree_ids(
 
             OrganizationalUnit.company_id
             == company_id,
-
-            OrganizationalUnit.is_active.is_(True),
         )
         .cte(
             name="unit_tree",
@@ -131,8 +129,6 @@ async def get_unit_tree_ids(
 
             OrganizationalUnit.company_id
             == company_id,
-
-            OrganizationalUnit.is_active.is_(True),
         )
     )
 
@@ -141,7 +137,9 @@ async def get_unit_tree_ids(
     )
 
     result = await session.execute(
-        select(unit_tree.c.id)
+        select(
+            unit_tree.c.id
+        )
     )
 
     return set(
