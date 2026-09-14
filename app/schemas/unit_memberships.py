@@ -1,8 +1,10 @@
 from datetime import datetime
+from typing import Self
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    model_validator,
 )
 
 
@@ -16,6 +18,24 @@ class UnitMembershipUpdate(BaseModel):
     is_primary: bool | None = None
 
     is_active: bool | None = None
+
+
+    @model_validator(
+        mode="after",
+    )
+    def validate_primary_state(
+        self,
+    ) -> Self:
+        if (
+            self.is_primary is True
+            and self.is_active is False
+        ):
+            raise ValueError(
+                "Primary unit membership "
+                "must be active"
+            )
+
+        return self
 
 
 class UnitMembershipResponse(BaseModel):

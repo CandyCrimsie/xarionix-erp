@@ -58,6 +58,13 @@ class UnitMembershipNotFoundError(Exception):
 class UnitMembershipAlreadyExistsError(Exception):
     pass
 
+
+class UnitMembershipInvalidStateError(
+    Exception
+):
+    pass
+
+
 class UnitMembershipPermissionDeniedError(
     Exception
 ):
@@ -535,6 +542,14 @@ async def update_membership_unit(
     is_primary: bool | None,
     is_active: bool | None,
 ) -> UnitMembership:
+    if (
+        is_primary is True
+        and is_active is False
+    ):
+        raise (
+            UnitMembershipInvalidStateError
+        )
+    
     unit_membership = await get_membership_unit(
         session,
         company_id=company_id,
