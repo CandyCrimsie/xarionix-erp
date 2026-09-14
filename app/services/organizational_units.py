@@ -259,6 +259,52 @@ async def list_scoped_organizational_units(
     )
 
 
+async def list_manageable_organizational_units(
+    session: AsyncSession,
+    *,
+    company_id: int,
+    current_membership_id: int,
+) -> list[OrganizationalUnit]:
+    company = await get_company_by_id(
+        session,
+        company_id,
+    )
+
+    if company is None:
+        raise CompanyNotFoundError
+
+
+    unit_ids = await _get_scoped_unit_ids(
+        session,
+        company_id=company_id,
+        current_membership_id=(
+            current_membership_id
+        ),
+        permission=(
+            PermissionCode
+                .ORGANIZATIONAL_UNITS_MANAGE
+        ),
+    )
+
+
+    if unit_ids is None:
+        return (
+            await get_company_organizational_units(
+                session,
+                company_id,
+            )
+        )
+
+
+    return (
+        await get_company_organizational_units_by_ids(
+            session,
+            company_id=company_id,
+            unit_ids=unit_ids,
+        )
+    )
+
+
 async def create_new_organizational_unit(
     session: AsyncSession,
     company_id: int,

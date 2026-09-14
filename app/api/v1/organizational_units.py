@@ -27,6 +27,7 @@ from services.organizational_units import (
     list_scoped_organizational_units,
     create_scoped_organizational_unit,
     update_scoped_organizational_unit,
+    list_manageable_organizational_units
 )
 
 from core.permissions.codes import (
@@ -91,6 +92,65 @@ async def get_units_endpoint(
     except CompanyNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found",
+        )
+
+    except OrganizationalUnitPermissionDeniedError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied",
+        )
+
+
+@router.get(
+    "/manageable",
+    response_model=list[
+        OrganizationalUnitResponse
+    ],
+)
+async def get_manageable_units_endpoint(
+    company_id: int,
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode
+                    .ORGANIZATIONAL_UNITS_MANAGE,
+            )
+        ),
+    ],
+) -> list[
+    OrganizationalUnitResponse
+]:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
+    try:
+        return (
+            await list_manageable_organizational_units(
+                session,
+                company_id=company_id,
+                current_membership_id=(
+                    context.membership.id
+                ),
+            )
+        )
+
+    except CompanyNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
             detail="Company not found",
         )
 

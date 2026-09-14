@@ -976,3 +976,232 @@ async def test_api_units_company_scope_can_create_root(
         response.json()["parent_id"]
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_api_manageable_units_use_manage_scope_not_read_scope(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    visible_response = (
+        await api_client.get(
+            (
+                f"/api/v1/companies/"
+                f"{ctx['company'].id}"
+                f"/units"
+            ),
+            headers=headers,
+        )
+    )
+
+    manageable_response = (
+        await api_client.get(
+            (
+                f"/api/v1/companies/"
+                f"{ctx['company'].id}"
+                f"/units/manageable"
+            ),
+            headers=headers,
+        )
+    )
+
+
+    assert (
+        visible_response.status_code
+        == 200
+    )
+
+    assert unit_ids(
+        visible_response
+    ) == {
+        ctx["support"].id,
+        ctx["support_l1"].id,
+        ctx["noc"].id,
+    }
+
+
+    assert (
+        manageable_response.status_code
+        == 200
+    )
+
+    assert unit_ids(
+        manageable_response
+    ) == {
+        ctx["support"].id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_manageable_units_tree_scope(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/manageable"
+        ),
+        headers=headers,
+    )
+
+
+    assert response.status_code == 200
+
+    assert unit_ids(
+        response
+    ) == {
+        ctx["support"].id,
+        ctx["support_l1"].id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_manageable_units_company_scope(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/manageable"
+        ),
+        headers=headers,
+    )
+
+
+    assert response.status_code == 200
+
+    assert unit_ids(
+        response
+    ) == {
+        ctx["support"].id,
+        ctx["support_l1"].id,
+        ctx["noc"].id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_manageable_units_requires_manage_permission(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/manageable"
+        ),
+        headers=headers,
+    )
+
+
+    assert response.status_code == 403
