@@ -509,6 +509,222 @@ async def test_api_unit_memberships_own_unit_reads_same_unit(
 
 
 @pytest.mark.asyncio
+async def test_api_unit_memberships_own_unit_hides_secondary_assignment_outside_scope(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+
+    outside_assignment = UnitMembership(
+        company_membership_id=(
+            ctx["same_unit"].id
+        ),
+        unit_id=(
+            ctx["noc"].id
+        ),
+        is_primary=False,
+    )
+
+    db_session.add(
+        outside_assignment
+    )
+
+    await db_session.flush()
+
+
+    await grant_members_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["current"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/company-memberships/"
+            f"{ctx['same_unit'].id}/units"
+        ),
+        headers=headers,
+    )
+
+
+    assert response.status_code == 200
+
+    assert {
+        item["id"]
+        for item in response.json()
+    } == {
+        ctx[
+            "same_unit_assignment"
+        ].id,
+    }
+
+
+    assert (
+        outside_assignment.id
+        not in {
+            item["id"]
+            for item
+            in response.json()
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_unit_memberships_own_unit_hides_specific_secondary_assignment_outside_scope(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+
+    outside_assignment = UnitMembership(
+        company_membership_id=(
+            ctx["same_unit"].id
+        ),
+        unit_id=(
+            ctx["noc"].id
+        ),
+        is_primary=False,
+    )
+
+    db_session.add(
+        outside_assignment
+    )
+
+    await db_session.flush()
+
+
+    await grant_members_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.OWN_UNIT,
+    )
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["current"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/company-memberships/"
+            f"{ctx['same_unit'].id}/units/"
+            f"{outside_assignment.id}"
+        ),
+        headers=headers,
+    )
+
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail":
+            "Unit membership not found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_unit_memberships_company_reads_secondary_assignment_in_other_unit(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+
+    outside_assignment = UnitMembership(
+        company_membership_id=(
+            ctx["same_unit"].id
+        ),
+        unit_id=(
+            ctx["noc"].id
+        ),
+        is_primary=False,
+    )
+
+    db_session.add(
+        outside_assignment
+    )
+
+    await db_session.flush()
+
+
+    await grant_members_read(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["current"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["current"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/company-memberships/"
+            f"{ctx['same_unit'].id}/units"
+        ),
+        headers=headers,
+    )
+
+
+    assert response.status_code == 200
+
+    assert {
+        item["id"]
+        for item in response.json()
+    } == {
+        ctx[
+            "same_unit_assignment"
+        ].id,
+
+        outside_assignment.id,
+    }
+
+
+@pytest.mark.asyncio
 async def test_api_unit_memberships_own_unit_hides_child(
     db_session: AsyncSession,
     api_client: AsyncClient,

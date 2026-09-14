@@ -190,7 +190,11 @@ async def _get_scoped_company_membership(
     company_membership_id: int,
     current_membership_id: int,
     permission: PermissionCode,
-) -> CompanyMembership:
+) -> tuple[
+    CompanyMembership,
+    PermissionScope,
+    set[int] | None,
+]:
     scope, unit_ids = (
         await _get_scope_context(
             session,
@@ -222,7 +226,11 @@ async def _get_scoped_company_membership(
         raise CompanyMembershipNotFoundError
 
 
-    return membership
+    return (
+        membership,
+        scope,
+        unit_ids,
+    )
 
 
 async def list_membership_units(
@@ -250,7 +258,11 @@ async def list_scoped_membership_units(
     company_membership_id: int,
     current_membership_id: int,
 ) -> list[UnitMembership]:
-    await _get_scoped_company_membership(
+    (
+        _,
+        scope,
+        allowed_unit_ids,
+    ) = await _get_scoped_company_membership(
         session,
         company_id=company_id,
         company_membership_id=(
@@ -264,10 +276,33 @@ async def list_scoped_membership_units(
         ),
     )
 
-    return await get_membership_units(
-        session,
-        company_membership_id,
+
+    assignments = (
+        await get_membership_units(
+            session,
+            company_membership_id,
+        )
     )
+
+
+    if scope not in {
+        PermissionScope.OWN_UNIT,
+        PermissionScope.OWN_UNIT_TREE,
+    }:
+        return assignments
+
+
+    if not allowed_unit_ids:
+        return []
+
+    return [
+        assignment
+        for assignment in assignments
+        if (
+            assignment.unit_id
+            in allowed_unit_ids
+        )
+    ]
 
 
 async def add_membership_to_unit(
@@ -437,7 +472,11 @@ async def get_scoped_membership_unit(
     unit_membership_id: int,
     current_membership_id: int,
 ) -> UnitMembership:
-    await _get_scoped_company_membership(
+    (
+        _,
+        scope,
+        allowed_unit_ids,
+    ) = await _get_scoped_company_membership(
         session,
         company_id=company_id,
         company_membership_id=(
@@ -459,11 +498,27 @@ async def get_scoped_membership_unit(
         )
     )
 
+
     if (
         unit_membership is None
         or unit_membership
             .company_membership_id
         != company_membership_id
+    ):
+        raise UnitMembershipNotFoundError
+
+
+    if (
+        scope
+        in {
+            PermissionScope.OWN_UNIT,
+            PermissionScope.OWN_UNIT_TREE,
+        }
+        and (
+            allowed_unit_ids is None
+            or unit_membership.unit_id
+            not in allowed_unit_ids
+        )
     ):
         raise UnitMembershipNotFoundError
 
