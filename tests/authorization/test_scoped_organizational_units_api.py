@@ -1425,3 +1425,364 @@ async def test_api_units_tree_manager_can_reactivate_own_inactive_root(
             .json()["is_active"]
         is True
     )
+
+
+@pytest.mark.asyncio
+async def test_api_units_company_cannot_move_unit_under_itself(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support'].id}"
+        ),
+        headers=headers,
+        json={
+            "parent_id":
+                ctx["support"].id,
+        },
+    )
+
+
+    assert response.status_code == 409
+
+    assert response.json() == {
+        "detail":
+            "Organizational unit hierarchy cycle detected",
+    }
+
+
+    await db_session.refresh(
+        ctx["support"]
+    )
+
+    assert (
+        ctx["support"].parent_id
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_units_tree_cannot_move_root_under_its_descendant(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support'].id}"
+        ),
+        headers=headers,
+        json={
+            "parent_id":
+                ctx["support_l1"].id,
+        },
+    )
+
+
+    assert response.status_code == 409
+
+    assert response.json() == {
+        "detail":
+            "Organizational unit hierarchy cycle detected",
+    }
+
+
+    await db_session.refresh(
+        ctx["support"]
+    )
+
+    await db_session.refresh(
+        ctx["support_l1"]
+    )
+
+
+    assert (
+        ctx["support"].parent_id
+        is None
+    )
+
+    assert (
+        ctx["support_l1"].parent_id
+        == ctx["support"].id
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_units_tree_cannot_move_unit_to_company_root(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=(
+            PermissionScope
+                .OWN_UNIT_TREE
+        ),
+    )
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support_l1'].id}"
+        ),
+        headers=headers,
+        json={
+            "parent_id":
+                None,
+        },
+    )
+
+
+    assert response.status_code == 403
+
+    assert response.json() == {
+        "detail":
+            "Permission denied",
+    }
+
+
+    await db_session.refresh(
+        ctx["support_l1"]
+    )
+
+    assert (
+        ctx["support_l1"].parent_id
+        == ctx["support"].id
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_units_company_can_move_child_to_root(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support_l1'].id}"
+        ),
+        headers=headers,
+        json={
+            "parent_id":
+                None,
+        },
+    )
+
+
+    assert response.status_code == 200
+
+    assert (
+        response.json()["parent_id"]
+        is None
+    )
+
+
+    await db_session.refresh(
+        ctx["support_l1"]
+    )
+
+    assert (
+        ctx["support_l1"].parent_id
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_units_company_cannot_move_unit_under_other_company(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    ctx = await create_context(
+        db_session
+    )
+
+
+    other_company = Company(
+        name="Other Company",
+    )
+
+    db_session.add(
+        other_company
+    )
+
+    await db_session.flush()
+
+
+    foreign_unit = OrganizationalUnit(
+        company_id=other_company.id,
+        name="Foreign Unit",
+        type=(
+            OrganizationalUnitType
+                .DEPARTMENT
+        ),
+    )
+
+    db_session.add(
+        foreign_unit
+    )
+
+    await db_session.flush()
+
+
+    await grant_units_manage(
+        db_session,
+        company=ctx["company"],
+        membership=ctx["membership"],
+        scope=PermissionScope.COMPANY,
+    )
+
+    await db_session.commit()
+
+
+    headers = await create_auth_headers(
+        user_id=(
+            ctx["membership"].user_id
+        ),
+        company_id=(
+            ctx["company"].id
+        ),
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{ctx['company'].id}"
+            f"/units/"
+            f"{ctx['support'].id}"
+        ),
+        headers=headers,
+        json={
+            "parent_id":
+                foreign_unit.id,
+        },
+    )
+
+
+    assert response.status_code == 409
+
+    assert response.json() == {
+        "detail": (
+            "Parent organizational unit belongs "
+            "to another company"
+        ),
+    }
+
+
+    await db_session.refresh(
+        ctx["support"]
+    )
+
+    assert (
+        ctx["support"].parent_id
+        is None
+    )
