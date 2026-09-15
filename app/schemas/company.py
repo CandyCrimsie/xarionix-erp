@@ -8,7 +8,7 @@ from pydantic import (
 )
 
 
-class CompanyCreate(BaseModel):
+class CompanyChildCreate(BaseModel):
     name: str = Field(
         min_length=1,
         max_length=255,
@@ -18,8 +18,6 @@ class CompanyCreate(BaseModel):
         default=None,
         max_length=100,
     )
-
-    parent_id: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -48,6 +46,12 @@ class CompanyCreate(BaseModel):
         value = value.strip()
 
         return value or None
+
+
+class CompanyCreate(
+    CompanyChildCreate
+):
+    parent_id: int | None = None
 
 
 class CompanyUpdate(BaseModel):

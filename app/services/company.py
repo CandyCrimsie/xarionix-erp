@@ -7,12 +7,26 @@ from repositories.company import (
     get_companies,
 )
 from schemas.company import (
+    CompanyChildCreate,
     CompanyCreate,
     CompanyUpdate,
 )
 
 from services.system_roles import (
     sync_system_roles_for_company,
+    sync_system_roles_for_company_in_transaction,
+)
+
+from core.system_roles import (
+    SystemRoleKey,
+)
+
+from repositories.company_memberships import (
+    create_company_membership,
+)
+
+from repositories.membership_roles import (
+    create_membership_roles,
 )
 
 
@@ -25,6 +39,12 @@ class ParentCompanyNotFoundError(Exception):
 
 
 class CompanyParentCycleError(Exception):
+    pass
+
+
+class CompanyAdministratorRoleUnavailableError(
+    Exception
+):
     pass
 
 
@@ -123,6 +143,106 @@ async def create_new_company(
         session,
         company_id=company_id,
     )
+
+    await session.refresh(
+        company
+    )
+
+    return company
+
+
+async def create_child_company_with_administrator(
+    session: AsyncSession,
+    *,
+    parent_company_id: int,
+    administrator_user_id: int,
+    data: CompanyChildCreate,
+) -> Company:
+    parent = await get_company_by_id(
+        session,
+        parent_company_id,
+    )
+
+    if (
+        parent is None
+        or not parent.is_active
+    ):
+        raise ParentCompanyNotFoundError
+
+
+    try:
+        company = await create_company(
+            session,
+            name=data.name,
+            short_name=data.short_name,
+            parent_id=parent_company_id,
+        )
+
+
+        (
+            system_roles,
+            _,
+        ) = (
+            await sync_system_roles_for_company_in_transaction(
+                session,
+                company_id=company.id,
+            )
+        )
+
+
+        administrator_role = next(
+            (
+                role
+                for role in system_roles
+                if (
+                    role.system_key
+                    == (
+                        SystemRoleKey
+                        .ADMINISTRATOR
+                        .value
+                    )
+                )
+            ),
+            None,
+        )
+
+
+        if administrator_role is None:
+            raise (
+                CompanyAdministratorRoleUnavailableError
+            )
+
+
+        membership = (
+            await create_company_membership(
+                session,
+                user_id=administrator_user_id,
+                company_id=company.id,
+            )
+        )
+
+
+        await create_membership_roles(
+            session,
+            company_membership_id=(
+                membership.id
+            ),
+            role_ids=[
+                administrator_role.id,
+            ],
+        )
+                #
+        # Company + system roles +
+        # creator membership +
+        # Administrator assignment
+        # фиксируются атомарно.
+        #
+        await session.commit()
+
+    except Exception:
+        await session.rollback()
+        raise
+
 
     await session.refresh(
         company
