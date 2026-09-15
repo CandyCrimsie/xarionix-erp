@@ -141,9 +141,19 @@ async def get_company_tree(
 
     nodes = {
         company.id:
-            CompanyTreeNodeResponse
-            .model_validate(
-                company
+            CompanyTreeNodeResponse(
+                id=company.id,
+                parent_id=company.parent_id,
+
+                name=company.name,
+                short_name=company.short_name,
+
+                is_active=company.is_active,
+
+                created_at=company.created_at,
+                updated_at=company.updated_at,
+
+                children=[],
             )
 
         for company
