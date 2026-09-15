@@ -588,3 +588,379 @@ async def test_company_tree_is_scoped_to_requested_root(
         second_child_id
         not in returned_ids
     )
+
+
+@pytest.mark.asyncio
+async def test_administrator_can_update_company_metadata(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    company_id = (
+        setup["company_id"]
+    )
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{company_id}"
+        ),
+        json={
+            "name": (
+                "  Renamed Company  "
+            ),
+            "short_name": (
+                "  RENAMED  "
+            ),
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(company_id),
+        },
+    )
+
+
+    assert response.status_code == 200
+
+    company = response.json()
+
+
+    assert (
+        company["id"]
+        == company_id
+    )
+
+    assert (
+        company["name"]
+        == "Renamed Company"
+    )
+
+    assert (
+        company["short_name"]
+        == "RENAMED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_administrator_can_clear_company_short_name(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    company_id = (
+        setup["company_id"]
+    )
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{company_id}"
+        ),
+        json={
+            "short_name": None,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(company_id),
+        },
+    )
+
+
+    assert response.status_code == 200
+
+    assert (
+        response.json()[
+            "short_name"
+        ]
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_company_name_cannot_be_null(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    company_id = (
+        setup["company_id"]
+    )
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{company_id}"
+        ),
+        json={
+            "name": None,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(company_id),
+        },
+    )
+
+
+    assert response.status_code == 422
+
+
+    current_response = (
+        await api_client.get(
+            (
+                f"/api/v1/companies/"
+                f"{company_id}"
+            ),
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(company_id),
+            },
+        )
+    )
+
+
+    assert (
+        current_response.status_code
+        == 200
+    )
+
+    assert (
+        current_response.json()[
+            "name"
+        ]
+        == "Main Company"
+    )
+
+
+@pytest.mark.asyncio
+async def test_company_metadata_update_cannot_change_hierarchy_fields(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    company_id = (
+        setup["company_id"]
+    )
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    deactivate_response = (
+        await api_client.patch(
+            (
+                f"/api/v1/companies/"
+                f"{company_id}"
+            ),
+            json={
+                "is_active": False,
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(company_id),
+            },
+        )
+    )
+
+
+    assert (
+        deactivate_response.status_code
+        == 400
+    )
+
+    assert (
+        deactivate_response.json()
+        == {
+            "detail": (
+                "parent_id and is_active cannot "
+                "be changed through this endpoint"
+            ),
+        }
+    )
+
+
+    move_response = (
+        await api_client.patch(
+            (
+                f"/api/v1/companies/"
+                f"{company_id}"
+            ),
+            json={
+                "parent_id": company_id,
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(company_id),
+            },
+        )
+    )
+
+
+    assert (
+        move_response.status_code
+        == 400
+    )
+
+
+@pytest.mark.asyncio
+async def test_company_metadata_update_requires_matching_company_context(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    parent_id = (
+        setup["company_id"]
+    )
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{parent_id}/children"
+            ),
+            json={
+                "name": "Child Company",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(parent_id),
+            },
+        )
+    )
+
+    assert (
+        child_response.status_code
+        == 201
+    )
+
+    child_id = (
+        child_response.json()["id"]
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{child_id}"
+        ),
+        json={
+            "name": "Hacked Name",
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            # Намеренно остаёмся
+            # в parent context.
+            "X-Company-Id":
+                str(parent_id),
+        },
+    )
+
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Company not found",
+    }
+
+
+    child_get_response = (
+        await api_client.get(
+            (
+                f"/api/v1/companies/"
+                f"{child_id}"
+            ),
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(child_id),
+            },
+        )
+    )
+
+
+    assert (
+        child_get_response.status_code
+        == 200
+    )
+
+    assert (
+        child_get_response.json()[
+            "name"
+        ]
+        == "Child Company"
+    )

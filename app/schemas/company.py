@@ -76,9 +76,11 @@ class CompanyUpdate(BaseModel):
     def normalize_name(
         cls,
         value: str | None,
-    ) -> str | None:
+    ) -> str:
         if value is None:
-            return None
+            raise ValueError(
+                "Company name cannot be null"
+            )
 
         value = value.strip()
 
