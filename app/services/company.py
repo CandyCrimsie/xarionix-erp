@@ -62,6 +62,18 @@ class CompanyInactiveParentError(
     pass
 
 
+class CompanyRootDeactivationForbiddenError(
+    Exception
+):
+    pass
+
+
+class CompanyParentInactiveError(
+    Exception
+):
+    pass
+
+
 async def _validate_parent_change(
     *,
     session: AsyncSession,
@@ -299,6 +311,137 @@ async def move_company_within_tree(
     company.parent_id = (
         parent.id
     )
+
+
+    await session.commit()
+
+    await session.refresh(
+        company
+    )
+
+
+    return company
+
+
+async def set_company_active_state_within_tree(
+    session: AsyncSession,
+    *,
+    root_company_id: int,
+    company_id: int,
+    is_active: bool,
+) -> Company:
+    companies = (
+        await get_company_subtree(
+            session,
+            root_company_id,
+        )
+    )
+
+
+    if not companies:
+        raise CompanyNotFoundError
+
+
+    companies_by_id = {
+        company.id: company
+        for company
+        in companies
+    }
+
+
+    company = companies_by_id.get(
+        company_id
+    )
+
+
+    #
+    # Не раскрываем компании
+    # вне текущего subtree.
+    #
+    if company is None:
+        raise CompanyNotFoundError
+
+
+    #
+    # Текущий root нельзя выключить
+    # через его собственный context.
+    #
+    if (
+        company_id
+        == root_company_id
+        and not is_active
+    ):
+        raise (
+            CompanyRootDeactivationForbiddenError
+        )
+
+
+    #
+    # Root уже активен, иначе сам
+    # CurrentCompanyContext не был бы
+    # создан.
+    #
+    if (
+        company_id
+        == root_company_id
+    ):
+        return company
+
+
+    if not is_active:
+        subtree = (
+            await get_company_subtree(
+                session,
+                company_id,
+            )
+        )
+
+
+        #
+        # Деактивация всегда каскадная.
+        #
+        for subtree_company in subtree:
+            subtree_company.is_active = (
+                False
+            )
+
+
+        await session.commit()
+
+        await session.refresh(
+            company
+        )
+
+
+        return company
+
+
+    #
+    # При reactivation непосредственный
+    # parent обязан быть активен.
+    #
+    if company.parent_id is None:
+        raise CompanyNotFoundError
+
+
+    parent = companies_by_id.get(
+        company.parent_id
+    )
+
+
+    if parent is None:
+        raise CompanyNotFoundError
+
+
+    if not parent.is_active:
+        raise CompanyParentInactiveError
+
+
+    if company.is_active:
+        return company
+
+
+    company.is_active = True
 
 
     await session.commit()

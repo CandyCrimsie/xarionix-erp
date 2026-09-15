@@ -1418,3 +1418,498 @@ async def test_company_move_cannot_target_company_outside_current_tree(
     assert response.json() == {
         "detail": "Company not found",
     }
+
+
+@pytest.mark.asyncio
+async def test_company_deactivation_cascades_to_descendants(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Branch",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert child_response.status_code == 201
+
+    child_id = (
+        child_response.json()["id"]
+    )
+
+
+    grandchild_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{child_id}/children"
+            ),
+            json={
+                "name": "Office",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(child_id),
+            },
+        )
+    )
+
+    assert (
+        grandchild_response.status_code
+        == 201
+    )
+
+    grandchild_id = (
+        grandchild_response
+        .json()["id"]
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{child_id}"
+            "/activation"
+        ),
+        json={
+            "is_active": False,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 200
+
+    assert (
+        response.json()["is_active"]
+        is False
+    )
+
+
+    tree_response = await api_client.get(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}/tree"
+        ),
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    tree = tree_response.json()
+
+    branch = next(
+        item
+        for item
+        in tree["children"]
+        if item["id"] == child_id
+    )
+
+    office = branch["children"][0]
+
+
+    assert branch["is_active"] is False
+
+    assert office["id"] == grandchild_id
+    assert office["is_active"] is False
+
+    companies_response = (
+        await api_client.get(
+            "/api/v1/me/companies",
+            headers={
+                "Authorization":
+                    authorization,
+            },
+        )
+    )
+
+
+    assert (
+        companies_response.status_code
+        == 200
+    )
+
+
+    company_ids = {
+        company["id"]
+        for company
+        in companies_response.json()
+    }
+
+
+    assert root_id in company_ids
+
+    assert (
+        child_id
+        not in company_ids
+    )
+
+    assert (
+        grandchild_id
+        not in company_ids
+    )
+
+
+@pytest.mark.asyncio
+async def test_company_reactivation_requires_active_parent(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Branch",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    child_id = (
+        child_response.json()["id"]
+    )
+
+
+    grandchild_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{child_id}/children"
+            ),
+            json={
+                "name": "Office",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(child_id),
+            },
+        )
+    )
+
+    grandchild_id = (
+        grandchild_response
+        .json()["id"]
+    )
+
+
+    deactivate_response = (
+        await api_client.patch(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}"
+                f"/tree/{child_id}"
+                "/activation"
+            ),
+            json={
+                "is_active": False,
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert (
+        deactivate_response.status_code
+        == 200
+    )
+
+
+    #
+    # Parent Branch пока inactive.
+    #
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{grandchild_id}"
+            "/activation"
+        ),
+        json={
+            "is_active": True,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 409
+
+    assert response.json() == {
+        "detail": (
+            "Parent company must be active "
+            "before company activation"
+        ),
+    }
+
+
+    #
+    # Сначала восстанавливаем Branch.
+    #
+    branch_response = (
+        await api_client.patch(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}"
+                f"/tree/{child_id}"
+                "/activation"
+            ),
+            json={
+                "is_active": True,
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+
+    assert branch_response.status_code == 200
+    assert branch_response.json()["is_active"] is True
+
+
+    #
+    # Office сам при этом всё ещё inactive.
+    #
+    tree_response = await api_client.get(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}/tree"
+        ),
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+    tree = tree_response.json()
+
+    branch = next(
+        item
+        for item
+        in tree["children"]
+        if item["id"] == child_id
+    )
+
+    assert (
+        branch["children"][0][
+            "is_active"
+        ]
+        is False
+    )
+
+
+    #
+    # Теперь можно восстановить Office.
+    #
+    office_response = (
+        await api_client.patch(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}"
+                f"/tree/{grandchild_id}"
+                "/activation"
+            ),
+            json={
+                "is_active": True,
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+
+    assert office_response.status_code == 200
+    assert office_response.json()["is_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_root_company_cannot_be_deactivated(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{root_id}"
+            "/activation"
+        ),
+        json={
+            "is_active": False,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 400
+
+    assert response.json() == {
+        "detail": (
+            "Root company cannot be deactivated"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_company_activation_cannot_target_outside_current_tree(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    outside = await create_new_company(
+        db_session,
+        CompanyCreate(
+            name="Outside Company",
+        ),
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{outside.id}"
+            "/activation"
+        ),
+        json={
+            "is_active": False,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Company not found",
+    }

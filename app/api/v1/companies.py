@@ -25,6 +25,7 @@ from dependencies.company import (
 from dependencies.database import get_session
 
 from schemas.company import (
+    CompanyActivationRequest,
     CompanyChildCreate,
     CompanyMoveRequest,
     CompanyResponse,
@@ -44,6 +45,9 @@ from services.company import (
     get_company_tree,
     move_company_within_tree,
     update_company,
+    CompanyParentInactiveError,
+    CompanyRootDeactivationForbiddenError,
+    set_company_active_state_within_tree,
 )
 
 
@@ -255,6 +259,84 @@ async def move_company_endpoint(
             detail=(
                 "Active company cannot be moved "
                 "under inactive company"
+            ),
+        )
+
+
+@router.patch(
+    (
+        "/{company_id}"
+        "/tree/{target_company_id}"
+        "/activation"
+    ),
+    response_model=CompanyResponse,
+)
+async def set_company_activation_endpoint(
+    company_id: int,
+    target_company_id: int,
+    data: CompanyActivationRequest,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.COMPANIES_MANAGE,
+                minimum_scope=(
+                    PermissionScope.COMPANY
+                ),
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> CompanyResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
+
+    try:
+        return (
+            await set_company_active_state_within_tree(
+                session,
+                root_company_id=company_id,
+                company_id=target_company_id,
+                is_active=data.is_active,
+            )
+        )
+
+    except CompanyNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Company not found",
+        )
+
+    except (
+        CompanyRootDeactivationForbiddenError
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "Root company cannot be deactivated"
+            ),
+        )
+
+    except CompanyParentInactiveError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_409_CONFLICT
+            ),
+            detail=(
+                "Parent company must be active "
+                "before company activation"
             ),
         )
 

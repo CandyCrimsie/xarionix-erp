@@ -139,3 +139,9 @@ class CompanyMoveRequest(
     parent_id: int = Field(
         gt=0,
     )
+
+
+class CompanyActivationRequest(
+    BaseModel
+):
+    is_active: bool
