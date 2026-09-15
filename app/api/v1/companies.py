@@ -27,6 +27,7 @@ from dependencies.database import get_session
 from schemas.company import (
     CompanyChildCreate,
     CompanyResponse,
+    CompanyTreeNodeResponse,
     CompanyUpdate,
 )
 
@@ -36,6 +37,7 @@ from services.company import (
     ParentCompanyNotFoundError,
     create_child_company_with_administrator,
     get_company,
+    get_company_tree,
     update_company,
 )
 
@@ -110,6 +112,53 @@ async def create_child_company_endpoint(
             detail=(
                 "Company bootstrap failed"
             ),
+        )
+
+
+@router.get(
+    "/{company_id}/tree",
+    response_model=(
+        CompanyTreeNodeResponse
+    ),
+)
+async def get_company_tree_endpoint(
+    company_id: int,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.COMPANIES_READ,
+                minimum_scope=(
+                    PermissionScope.COMPANY
+                ),
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> CompanyTreeNodeResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
+
+    try:
+        return await get_company_tree(
+            session,
+            company_id,
+        )
+
+    except CompanyNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Company not found",
         )
 
 

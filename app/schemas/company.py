@@ -119,3 +119,13 @@ class CompanyResponse(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+
+class CompanyTreeNodeResponse(
+    CompanyResponse
+):
+    children: list[
+        "CompanyTreeNodeResponse"
+    ] = Field(
+        default_factory=list,
+    )

@@ -31,6 +31,64 @@ async def get_companies(
     )
 
 
+async def get_company_subtree(
+    session: AsyncSession,
+    root_company_id: int,
+) -> list[Company]:
+    company_tree = (
+        select(
+            Company.id
+        )
+        .where(
+            Company.id
+            == root_company_id
+        )
+        .cte(
+            name="company_tree",
+            recursive=True,
+        )
+    )
+
+
+    company_tree = (
+        company_tree.union_all(
+            select(
+                Company.id
+            )
+            .where(
+                Company.parent_id
+                == company_tree.c.id
+            )
+        )
+    )
+
+
+    stmt = (
+        select(
+            Company
+        )
+        .join(
+            company_tree,
+            company_tree.c.id
+            == Company.id,
+        )
+        .order_by(
+            Company.name.asc(),
+            Company.id.asc(),
+        )
+    )
+
+
+    result = await session.execute(
+        stmt
+    )
+
+
+    return list(
+        result.scalars().all()
+    )
+
+
 async def create_company(
     session: AsyncSession,
     *,

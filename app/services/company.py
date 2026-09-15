@@ -4,11 +4,13 @@ from models.company import Company
 from repositories.company import (
     create_company,
     get_company_by_id,
+    get_company_subtree,
     get_companies,
 )
 from schemas.company import (
     CompanyChildCreate,
     CompanyCreate,
+    CompanyTreeNodeResponse,
     CompanyUpdate,
 )
 
@@ -102,6 +104,96 @@ async def get_company(
         raise CompanyNotFoundError
 
     return company
+
+
+def _sort_company_tree(
+    node: CompanyTreeNodeResponse,
+) -> None:
+    node.children.sort(
+        key=lambda child: (
+            child.name.casefold(),
+            child.id,
+        )
+    )
+
+
+    for child in node.children:
+        _sort_company_tree(
+            child
+        )
+
+
+async def get_company_tree(
+    session: AsyncSession,
+    company_id: int,
+) -> CompanyTreeNodeResponse:
+    companies = (
+        await get_company_subtree(
+            session,
+            company_id,
+        )
+    )
+
+
+    if not companies:
+        raise CompanyNotFoundError
+
+
+    nodes = {
+        company.id:
+            CompanyTreeNodeResponse
+            .model_validate(
+                company
+            )
+
+        for company
+        in companies
+    }
+
+
+    root = nodes.get(
+        company_id
+    )
+
+
+    if root is None:
+        raise CompanyNotFoundError
+
+
+    for company in companies:
+        if (
+            company.id
+            == company_id
+        ):
+            continue
+
+
+        if company.parent_id is None:
+            continue
+
+
+        parent = nodes.get(
+            company.parent_id
+        )
+
+
+        if parent is None:
+            continue
+
+
+        parent.children.append(
+            nodes[
+                company.id
+            ]
+        )
+
+
+    _sort_company_tree(
+        root
+    )
+
+
+    return root
 
 
 async def create_new_company(

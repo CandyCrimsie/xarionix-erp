@@ -263,3 +263,328 @@ async def test_child_creation_requires_path_company_to_match_context(
     assert response.json() == {
         "detail": "Company not found",
     }
+
+
+@pytest.mark.asyncio
+async def test_company_tree_returns_nested_descendants(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = (
+        setup["company_id"]
+    )
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Regional Company",
+                "short_name": "REG",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert (
+        child_response.status_code
+        == 201
+    )
+
+    child_id = (
+        child_response.json()["id"]
+    )
+
+
+    grandchild_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{child_id}/children"
+            ),
+            json={
+                "name": "Local Branch",
+                "short_name": "LOCAL",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(child_id),
+            },
+        )
+    )
+
+    assert (
+        grandchild_response.status_code
+        == 201
+    )
+
+    grandchild_id = (
+        grandchild_response
+        .json()["id"]
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}/tree"
+        ),
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 200
+
+    tree = response.json()
+
+
+    assert tree["id"] == root_id
+    assert tree["parent_id"] is None
+
+    assert len(
+        tree["children"]
+    ) == 1
+
+
+    child = tree["children"][0]
+
+    assert child["id"] == child_id
+
+    assert (
+        child["parent_id"]
+        == root_id
+    )
+
+    assert (
+        child["name"]
+        == "Regional Company"
+    )
+
+
+    assert len(
+        child["children"]
+    ) == 1
+
+
+    grandchild = (
+        child["children"][0]
+    )
+
+    assert (
+        grandchild["id"]
+        == grandchild_id
+    )
+
+    assert (
+        grandchild["parent_id"]
+        == child_id
+    )
+
+    assert (
+        grandchild["name"]
+        == "Local Branch"
+    )
+
+    assert (
+        grandchild["children"]
+        == []
+    )
+
+
+@pytest.mark.asyncio
+async def test_company_tree_is_scoped_to_requested_root(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = (
+        setup["company_id"]
+    )
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    first_child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "First Child",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert (
+        first_child_response
+        .status_code
+        == 201
+    )
+
+    first_child_id = (
+        first_child_response
+        .json()["id"]
+    )
+
+
+    second_child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Second Child",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert (
+        second_child_response
+        .status_code
+        == 201
+    )
+
+    second_child_id = (
+        second_child_response
+        .json()["id"]
+    )
+
+
+    grandchild_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{first_child_id}/children"
+            ),
+            json={
+                "name": "Grandchild",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(
+                        first_child_id
+                    ),
+            },
+        )
+    )
+
+    assert (
+        grandchild_response
+        .status_code
+        == 201
+    )
+
+    grandchild_id = (
+        grandchild_response
+        .json()["id"]
+    )
+
+
+    response = await api_client.get(
+        (
+            f"/api/v1/companies/"
+            f"{first_child_id}/tree"
+        ),
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(
+                    first_child_id
+                ),
+        },
+    )
+
+
+    assert response.status_code == 200
+
+    tree = response.json()
+
+
+    assert (
+        tree["id"]
+        == first_child_id
+    )
+
+    assert {
+        child["id"]
+        for child
+        in tree["children"]
+    } == {
+        grandchild_id,
+    }
+
+
+    returned_ids = {
+        tree["id"],
+        *[
+            child["id"]
+            for child
+            in tree["children"]
+        ],
+    }
+
+
+    assert root_id not in returned_ids
+
+    assert (
+        second_child_id
+        not in returned_ids
+    )
