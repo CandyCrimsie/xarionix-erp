@@ -50,6 +50,18 @@ class CompanyAdministratorRoleUnavailableError(
     pass
 
 
+class CompanyRootMoveForbiddenError(
+    Exception
+):
+    pass
+
+
+class CompanyInactiveParentError(
+    Exception
+):
+    pass
+
+
 async def _validate_parent_change(
     *,
     session: AsyncSession,
@@ -204,6 +216,99 @@ async def get_company_tree(
 
 
     return root
+
+
+async def move_company_within_tree(
+    session: AsyncSession,
+    *,
+    root_company_id: int,
+    company_id: int,
+    parent_id: int,
+) -> Company:
+    companies = (
+        await get_company_subtree(
+            session,
+            root_company_id,
+        )
+    )
+
+
+    if not companies:
+        raise CompanyNotFoundError
+
+
+    companies_by_id = {
+        company.id: company
+        for company
+        in companies
+    }
+
+
+    if (
+        company_id
+        == root_company_id
+    ):
+        raise (
+            CompanyRootMoveForbiddenError
+        )
+
+
+    company = companies_by_id.get(
+        company_id
+    )
+
+    parent = companies_by_id.get(
+        parent_id
+    )
+
+
+        #
+    # Не раскрываем существование
+    # компаний вне текущего subtree.
+    #
+    if (
+        company is None
+        or parent is None
+    ):
+        raise CompanyNotFoundError
+
+
+    if (
+        company.is_active
+        and not parent.is_active
+    ):
+        raise (
+            CompanyInactiveParentError
+        )
+
+
+    if (
+        company.parent_id
+        == parent_id
+    ):
+        return company
+
+
+    await _validate_parent_change(
+        session=session,
+        company_id=company.id,
+        parent_id=parent.id,
+    )
+
+
+    company.parent_id = (
+        parent.id
+    )
+
+
+    await session.commit()
+
+    await session.refresh(
+        company
+    )
+
+
+    return company
 
 
 async def create_new_company(

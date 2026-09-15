@@ -18,6 +18,14 @@ from repositories.membership_roles import (
     get_membership_roles,
 )
 
+from schemas.company import (
+    CompanyCreate,
+)
+
+from services.company import (
+    create_new_company,
+)
+
 
 async def initialize_and_login(
     api_client: AsyncClient,
@@ -964,3 +972,449 @@ async def test_company_metadata_update_requires_matching_company_context(
         ]
         == "Child Company"
     )
+
+
+@pytest.mark.asyncio
+async def test_administrator_can_move_company_inside_current_tree(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    first_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Branch A",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    second_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Branch B",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
+
+
+    first_id = (
+        first_response.json()["id"]
+    )
+
+    second_id = (
+        second_response.json()["id"]
+    )
+
+
+    office_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{first_id}/children"
+            ),
+            json={
+                "name": "Office A1",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(first_id),
+            },
+        )
+    )
+
+
+    assert (
+        office_response.status_code
+        == 201
+    )
+
+    office_id = (
+        office_response.json()["id"]
+    )
+
+
+    move_response = (
+        await api_client.patch(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}"
+                f"/tree/{office_id}"
+                "/parent"
+            ),
+            json={
+                "parent_id":
+                    second_id,
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+
+    assert (
+        move_response.status_code
+        == 200
+    )
+
+    assert (
+        move_response.json()[
+            "parent_id"
+        ]
+        == second_id
+    )
+
+
+    tree_response = (
+        await api_client.get(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/tree"
+            ),
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+
+    assert tree_response.status_code == 200
+
+    tree = tree_response.json()
+
+
+    branch_a = next(
+        child
+        for child
+        in tree["children"]
+        if child["id"] == first_id
+    )
+
+    branch_b = next(
+        child
+        for child
+        in tree["children"]
+        if child["id"] == second_id
+    )
+
+
+    assert (
+        branch_a["children"]
+        == []
+    )
+
+    assert {
+        child["id"]
+        for child
+        in branch_b["children"]
+    } == {
+        office_id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_root_company_cannot_be_moved(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Child",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert child_response.status_code == 201
+
+    child_id = (
+        child_response.json()["id"]
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{root_id}"
+            "/parent"
+        ),
+        json={
+            "parent_id":
+                child_id,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 400
+
+    assert response.json() == {
+        "detail": (
+            "Root company cannot be moved"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_company_cannot_be_moved_under_its_descendant(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    parent_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Parent",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert parent_response.status_code == 201
+
+    parent_id = (
+        parent_response.json()["id"]
+    )
+
+
+    child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{parent_id}/children"
+            ),
+            json={
+                "name": "Child",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(parent_id),
+            },
+        )
+    )
+
+    assert child_response.status_code == 201
+
+    child_id = (
+        child_response.json()["id"]
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{parent_id}"
+            "/parent"
+        ),
+        json={
+            "parent_id":
+                child_id,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 409
+
+    assert response.json() == {
+        "detail": (
+            "Company hierarchy cycle detected"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_company_move_cannot_target_company_outside_current_tree(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Managed Child",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert child_response.status_code == 201
+
+    child_id = (
+        child_response.json()["id"]
+    )
+
+
+    outside = await create_new_company(
+        db_session,
+        CompanyCreate(
+            name="Outside Root",
+        ),
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{child_id}"
+            "/parent"
+        ),
+        json={
+            "parent_id":
+                outside.id,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Company not found",
+    }

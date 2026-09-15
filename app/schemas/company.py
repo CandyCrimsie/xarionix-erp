@@ -131,3 +131,11 @@ class CompanyTreeNodeResponse(
     ] = Field(
         default_factory=list,
     )
+
+
+class CompanyMoveRequest(
+    BaseModel
+):
+    parent_id: int = Field(
+        gt=0,
+    )

@@ -26,6 +26,7 @@ from dependencies.database import get_session
 
 from schemas.company import (
     CompanyChildCreate,
+    CompanyMoveRequest,
     CompanyResponse,
     CompanyTreeNodeResponse,
     CompanyUpdate,
@@ -33,11 +34,15 @@ from schemas.company import (
 
 from services.company import (
     CompanyAdministratorRoleUnavailableError,
+    CompanyInactiveParentError,
     CompanyNotFoundError,
+    CompanyParentCycleError,
+    CompanyRootMoveForbiddenError,
     ParentCompanyNotFoundError,
     create_child_company_with_administrator,
     get_company,
     get_company_tree,
+    move_company_within_tree,
     update_company,
 )
 
@@ -159,6 +164,98 @@ async def get_company_tree_endpoint(
                 status.HTTP_404_NOT_FOUND
             ),
             detail="Company not found",
+        )
+
+
+@router.patch(
+    (
+        "/{company_id}"
+        "/tree/{target_company_id}"
+        "/parent"
+    ),
+    response_model=CompanyResponse,
+)
+async def move_company_endpoint(
+    company_id: int,
+    target_company_id: int,
+    data: CompanyMoveRequest,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.COMPANIES_MANAGE,
+                minimum_scope=(
+                    PermissionScope.COMPANY
+                ),
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> CompanyResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
+
+    try:
+        return await move_company_within_tree(
+            session,
+            root_company_id=company_id,
+            company_id=target_company_id,
+            parent_id=data.parent_id,
+        )
+
+    except CompanyNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Company not found",
+        )
+
+    except CompanyRootMoveForbiddenError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "Root company cannot be moved"
+            ),
+        )
+
+    except CompanyParentCycleError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_409_CONFLICT
+            ),
+            detail=(
+                "Company hierarchy cycle detected"
+            ),
+        )
+
+    except ParentCompanyNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Company not found",
+        )
+
+    except CompanyInactiveParentError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_409_CONFLICT
+            ),
+            detail=(
+                "Active company cannot be moved "
+                "under inactive company"
+            ),
         )
 
 
