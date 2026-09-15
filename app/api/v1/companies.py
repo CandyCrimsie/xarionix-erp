@@ -48,6 +48,7 @@ from services.company import (
     CompanyParentInactiveError,
     CompanyRootDeactivationForbiddenError,
     set_company_active_state_within_tree,
+    update_company_metadata_within_tree,
 )
 
 
@@ -160,6 +161,82 @@ async def get_company_tree_endpoint(
         return await get_company_tree(
             session,
             company_id,
+        )
+
+    except CompanyNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Company not found",
+        )
+
+
+@router.patch(
+    (
+        "/{company_id}"
+        "/tree/{target_company_id}"
+        "/metadata"
+    ),
+    response_model=CompanyResponse,
+)
+async def update_company_metadata_endpoint(
+    company_id: int,
+    target_company_id: int,
+    data: CompanyUpdate,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.COMPANIES_MANAGE,
+                minimum_scope=(
+                    PermissionScope.COMPANY
+                ),
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> CompanyResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
+
+    restricted_fields = {
+        "parent_id",
+        "is_active",
+    }
+
+
+    if (
+        restricted_fields
+        & data.model_fields_set
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "parent_id and is_active cannot "
+                "be changed through metadata endpoint"
+            ),
+        )
+
+
+    try:
+        return (
+            await update_company_metadata_within_tree(
+                session,
+                root_company_id=company_id,
+                company_id=target_company_id,
+                data=data,
+            )
         )
 
     except CompanyNotFoundError:

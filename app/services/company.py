@@ -230,6 +230,75 @@ async def get_company_tree(
     return root
 
 
+async def update_company_metadata_within_tree(
+    session: AsyncSession,
+    *,
+    root_company_id: int,
+    company_id: int,
+    data: CompanyUpdate,
+) -> Company:
+    companies = (
+        await get_company_subtree(
+            session,
+            root_company_id,
+        )
+    )
+
+
+    if not companies:
+        raise CompanyNotFoundError
+
+
+    company = next(
+        (
+            candidate
+            for candidate in companies
+            if candidate.id == company_id
+        ),
+        None,
+    )
+
+
+    #
+    # Target вне текущего subtree
+    # считается недоступным.
+    #
+    if company is None:
+        raise CompanyNotFoundError
+
+
+    #
+    # Этот service меняет только metadata.
+    # Иерархия и activation имеют
+    # отдельные операции.
+    #
+    update_data = data.model_dump(
+        exclude_unset=True,
+        include={
+            "name",
+            "short_name",
+        },
+    )
+
+
+    for field, value in update_data.items():
+        setattr(
+            company,
+            field,
+            value,
+        )
+
+
+    await session.commit()
+
+    await session.refresh(
+        company
+    )
+
+
+    return company
+
+
 async def move_company_within_tree(
     session: AsyncSession,
     *,

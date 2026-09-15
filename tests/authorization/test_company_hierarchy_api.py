@@ -1913,3 +1913,238 @@ async def test_company_activation_cannot_target_outside_current_tree(
     assert response.json() == {
         "detail": "Company not found",
     }
+
+
+@pytest.mark.asyncio
+async def test_administrator_can_update_descendant_metadata_from_root_context(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Old Branch",
+                "short_name": "OLD",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert child_response.status_code == 201
+
+    child_id = (
+        child_response.json()["id"]
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{child_id}"
+            "/metadata"
+        ),
+        json={
+            "name":
+                "  New Branch  ",
+
+            "short_name":
+                "  NEW  ",
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 200
+
+    company = response.json()
+
+
+    assert company["id"] == child_id
+
+    assert (
+        company["name"]
+        == "New Branch"
+    )
+
+    assert (
+        company["short_name"]
+        == "NEW"
+    )
+
+    assert (
+        company["parent_id"]
+        == root_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_company_metadata_cannot_target_outside_current_tree(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    outside = await create_new_company(
+        db_session,
+        CompanyCreate(
+            name="Outside Company",
+        ),
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{outside.id}"
+            "/metadata"
+        ),
+        json={
+            "name":
+                "Unauthorized Rename",
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Company not found",
+    }
+
+
+    await db_session.refresh(
+        outside
+    )
+
+
+    assert (
+        outside.name
+        == "Outside Company"
+    )
+
+
+@pytest.mark.asyncio
+async def test_scoped_metadata_endpoint_rejects_hierarchy_fields(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+    root_id = setup["company_id"]
+
+    authorization = (
+        f"Bearer "
+        f"{login['access_token']}"
+    )
+
+
+    child_response = (
+        await api_client.post(
+            (
+                f"/api/v1/companies/"
+                f"{root_id}/children"
+            ),
+            json={
+                "name": "Child",
+            },
+            headers={
+                "Authorization":
+                    authorization,
+
+                "X-Company-Id":
+                    str(root_id),
+            },
+        )
+    )
+
+    assert child_response.status_code == 201
+
+    child_id = (
+        child_response.json()["id"]
+    )
+
+
+    response = await api_client.patch(
+        (
+            f"/api/v1/companies/"
+            f"{root_id}"
+            f"/tree/{child_id}"
+            "/metadata"
+        ),
+        json={
+            "is_active": False,
+        },
+        headers={
+            "Authorization":
+                authorization,
+
+            "X-Company-Id":
+                str(root_id),
+        },
+    )
+
+
+    assert response.status_code == 400
+
+    assert response.json() == {
+        "detail": (
+            "parent_id and is_active cannot "
+            "be changed through metadata endpoint"
+        ),
+    }
