@@ -68,6 +68,11 @@ class InstallationStatusResponse(
     state: InstallationState
     setup_allowed: bool
 
+    has_users: bool
+    has_companies: bool
+    has_memberships: bool
+    has_administrator: bool
+
 
 class InstallationInitializeResponse(
     BaseModel

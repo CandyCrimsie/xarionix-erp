@@ -90,6 +90,10 @@ async def test_inconsistent_database_does_not_allow_setup(
     assert status_response.json() == {
         "state": "inconsistent",
         "setup_allowed": False,
+        "has_users": True,
+        "has_companies": False,
+        "has_memberships": False,
+        "has_administrator": False,
     }
 
     setup_response = await api_client.post(
@@ -172,6 +176,10 @@ async def test_disabling_initial_administrator_does_not_reopen_setup(
     assert status_response.json() == {
         "state": "inconsistent",
         "setup_allowed": False,
+        "has_users": True,
+        "has_companies": True,
+        "has_memberships": True,
+        "has_administrator": False,
     }
 
     second_setup = await api_client.post(
@@ -474,4 +482,24 @@ async def test_disabled_user_cannot_refresh_session(
 
     assert response.json() == {
         "detail": "User is not available",
+    }
+
+
+@pytest.mark.asyncio
+async def test_setup_status_exposes_ready_diagnostics(
+    api_client: AsyncClient,
+):
+    response = await api_client.get(
+        "/api/v1/setup/status"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "state": "ready",
+        "setup_allowed": True,
+        "has_users": False,
+        "has_companies": False,
+        "has_memberships": False,
+        "has_administrator": False,
     }

@@ -58,10 +58,33 @@ async def get_setup_status_endpoint(
     )
 
     return InstallationStatusResponse(
-        state=installation_status.state,
+        state=(
+            installation_status.state
+        ),
+
         setup_allowed=(
             installation_status
             .setup_allowed
+        ),
+
+        has_users=(
+            installation_status
+            .has_users
+        ),
+
+        has_companies=(
+            installation_status
+            .has_companies
+        ),
+
+        has_memberships=(
+            installation_status
+            .has_memberships
+        ),
+
+        has_administrator=(
+            installation_status
+            .has_administrator
         ),
     )
 
