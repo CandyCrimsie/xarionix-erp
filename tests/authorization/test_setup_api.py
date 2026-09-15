@@ -38,6 +38,10 @@ async def test_setup_status_is_ready_on_empty_database(
     assert response.json() == {
         "state": "ready",
         "setup_allowed": True,
+        "has_users": False,
+        "has_companies": False,
+        "has_memberships": False,
+        "has_administrator": False,
     }
 
 
@@ -168,6 +172,10 @@ async def test_setup_status_becomes_installed_after_initialization(
     assert response.json() == {
         "state": "installed",
         "setup_allowed": False,
+        "has_users": True,
+        "has_companies": True,
+        "has_memberships": True,
+        "has_administrator": True,
     }
 
 

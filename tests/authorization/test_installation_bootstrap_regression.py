@@ -95,6 +95,10 @@ async def test_startup_authorization_bootstrap_does_not_consume_first_run(
     assert status_response.json() == {
         "state": "ready",
         "setup_allowed": True,
+        "has_users": False,
+        "has_companies": False,
+        "has_memberships": False,
+        "has_administrator": False,
     }
 
     #
@@ -127,6 +131,10 @@ async def test_startup_authorization_bootstrap_does_not_consume_first_run(
     assert final_status.json() == {
         "state": "installed",
         "setup_allowed": False,
+        "has_users": True,
+        "has_companies": True,
+        "has_memberships": True,
+        "has_administrator": True,
     }
 
 
@@ -335,6 +343,10 @@ async def test_restart_authorization_bootstrap_preserves_installed_system(
     assert status_response.json() == {
         "state": "installed",
         "setup_allowed": False,
+        "has_users": True,
+        "has_companies": True,
+        "has_memberships": True,
+        "has_administrator": True,
     }
 
 
