@@ -32,10 +32,12 @@ async def create_user(
     *,
     username: str,
     password_hash: str,
+    is_system_admin: bool = False,
 ) -> User:
     user = User(
         username=username,
         password_hash=password_hash,
+        is_system_admin=is_system_admin,
     )
 
     session.add(user)
