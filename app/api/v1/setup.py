@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import (
 from core.installation import (
     InstallationState,
 )
+from core.config import (
+    config,
+)
 
 from dependencies.database import (
     get_session,
@@ -117,10 +120,10 @@ async def initialize_setup_endpoint(
                     data.company.short_name
                 ),
                 username=(
-                    data.administrator.username
+                    config.SYSTEM_ADMIN_USERNAME
                 ),
                 password=(
-                    data.administrator.password
+                    config.SYSTEM_ADMIN_PASSWORD
                 ),
             )
         )

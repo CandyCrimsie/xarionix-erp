@@ -269,9 +269,12 @@ async def initialize_installation(
         user = await create_user(
             session,
             username=normalized_username,
+
             password_hash=hash_password(
                 password
             ),
+
+            is_system_admin=True,
         )
 
         membership = (

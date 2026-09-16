@@ -57,9 +57,18 @@ async def test_setup_initialize_creates_first_installation(
                 "name": "Main Company",
                 "short_name": "MAIN",
             },
+
+            #
+            # Намеренно не совпадает
+            # с SYSTEM_ADMIN_*.
+            #
             "administrator": {
-                "username": "Admin",
-                "password": "password123",
+                "username": (
+                    "client-admin"
+                ),
+                "password": (
+                    "client-password123"
+                ),
             },
         },
     )
@@ -118,6 +127,21 @@ async def test_setup_initialize_creates_first_installation(
 
     assert user is not None
 
+    assert (
+        user.is_system_admin
+        is True
+    )
+
+
+    client_admin = (
+        await get_user_by_username(
+            db_session,
+            "client-admin",
+        )
+    )
+
+    assert client_admin is None
+
     roles = await get_membership_roles(
         db_session,
         body["membership_id"],
@@ -131,6 +155,44 @@ async def test_setup_initialize_creates_first_installation(
             "administrator_role_id"
         ]
     }
+
+    login_response = (
+        await api_client.post(
+            "/api/v1/auth/login",
+            json={
+                "username":
+                    "admin",
+
+                "password":
+                    "password123",
+            },
+        )
+    )
+
+
+    assert (
+        login_response.status_code
+        == 200
+    )
+
+    wrong_login_response = (
+        await api_client.post(
+            "/api/v1/auth/login",
+            json={
+                "username":
+                    "admin",
+
+                "password":
+                    "client-password123",
+            },
+        )
+    )
+
+
+    assert (
+        wrong_login_response.status_code
+        == 401
+    )
 
 
 @pytest.mark.asyncio

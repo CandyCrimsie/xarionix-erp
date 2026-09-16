@@ -77,6 +77,13 @@ os.environ["REFRESH_COOKIE_NAME"] = (
 )
 os.environ["COOKIE_SECURE"] = "false"
 
+os.environ[
+    "SYSTEM_ADMIN_USERNAME"
+] = "admin"
+os.environ[
+    "SYSTEM_ADMIN_PASSWORD"
+] = "password123"
+
 
 #
 # Только теперь импортируем application code.
