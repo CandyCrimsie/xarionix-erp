@@ -388,9 +388,9 @@ async def test_user_cannot_select_company_without_membership(
     )
 
 
-    assert response.status_code == 404
+    assert response.status_code == 403
 
     assert response.json() == {
         "detail":
-            "Company not found",
+            "Company access denied",
     }
