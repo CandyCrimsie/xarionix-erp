@@ -8,10 +8,6 @@ from core.installation import (
     InstallationState,
 )
 
-from schemas.user import (
-    UserCreate,
-)
-
 
 class InstallationCompanyCreate(
     BaseModel
@@ -59,7 +55,6 @@ class InstallationInitializeRequest(
     BaseModel
 ):
     company: InstallationCompanyCreate
-    administrator: UserCreate
 
 
 class InstallationStatusResponse(

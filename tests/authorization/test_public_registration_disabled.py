@@ -44,10 +44,6 @@ async def test_public_registration_is_not_available_after_installation(
             "company": {
                 "name": "Main Company",
             },
-            "administrator": {
-                "username": "admin",
-                "password": "password123",
-            },
         },
     )
 
@@ -81,10 +77,6 @@ async def test_first_user_can_still_be_created_through_setup(
         json={
             "company": {
                 "name": "Main Company",
-            },
-            "administrator": {
-                "username": "admin",
-                "password": "password123",
             },
         },
     )

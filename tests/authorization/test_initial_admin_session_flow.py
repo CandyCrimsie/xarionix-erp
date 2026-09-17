@@ -33,10 +33,6 @@ async def initialize_and_login(
                 "name": "Main Company",
                 "short_name": "MAIN",
             },
-            "administrator": {
-                "username": "Admin",
-                "password": "password123",
-            },
         },
     )
 

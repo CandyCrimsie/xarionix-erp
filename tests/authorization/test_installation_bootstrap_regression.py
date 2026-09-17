@@ -52,10 +52,6 @@ async def initialize_installation_via_api(
                 "name": "Main Company",
                 "short_name": "MAIN",
             },
-            "administrator": {
-                "username": "admin",
-                "password": "password123",
-            },
         },
     )
 
@@ -112,10 +108,6 @@ async def test_startup_authorization_bootstrap_does_not_consume_first_run(
             "company": {
                 "name": "Main Company",
                 "short_name": "MAIN",
-            },
-            "administrator": {
-                "username": "admin",
-                "password": "password123",
             },
         },
     )

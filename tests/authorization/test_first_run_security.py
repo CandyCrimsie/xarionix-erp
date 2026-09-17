@@ -41,10 +41,6 @@ async def initialize_and_login(
                 "name": "Main Company",
                 "short_name": "MAIN",
             },
-            "administrator": {
-                "username": "admin",
-                "password": "password123",
-            },
         },
     )
 
@@ -102,10 +98,6 @@ async def test_inconsistent_database_does_not_allow_setup(
             "company": {
                 "name": "Attacker Company",
             },
-            "administrator": {
-                "username": "attacker-admin",
-                "password": "password123",
-            },
         },
     )
 
@@ -145,10 +137,6 @@ async def test_disabling_initial_administrator_does_not_reopen_setup(
             "company": {
                 "name": "Main Company",
             },
-            "administrator": {
-                "username": "admin",
-                "password": "password123",
-            },
         },
     )
 
@@ -187,10 +175,6 @@ async def test_disabling_initial_administrator_does_not_reopen_setup(
         json={
             "company": {
                 "name": "Second Company",
-            },
-            "administrator": {
-                "username": "new-admin",
-                "password": "password123",
             },
         },
     )

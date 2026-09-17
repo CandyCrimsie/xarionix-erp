@@ -57,19 +57,6 @@ async def test_setup_initialize_creates_first_installation(
                 "name": "Main Company",
                 "short_name": "MAIN",
             },
-
-            #
-            # Намеренно не совпадает
-            # с SYSTEM_ADMIN_*.
-            #
-            "administrator": {
-                "username": (
-                    "client-admin"
-                ),
-                "password": (
-                    "client-password123"
-                ),
-            },
         },
     )
 
@@ -131,16 +118,6 @@ async def test_setup_initialize_creates_first_installation(
         user.is_system_admin
         is True
     )
-
-
-    client_admin = (
-        await get_user_by_username(
-            db_session,
-            "client-admin",
-        )
-    )
-
-    assert client_admin is None
 
     roles = await get_membership_roles(
         db_session,
@@ -210,12 +187,6 @@ async def test_setup_status_becomes_installed_after_initialization(
                     ),
                     "short_name": None,
                 },
-                "administrator": {
-                    "username": "admin",
-                    "password": (
-                        "password123"
-                    ),
-                },
             },
         )
     )
@@ -252,10 +223,6 @@ async def test_setup_initialize_cannot_be_called_twice(
             "company": {
                 "name": "Main Company",
             },
-            "administrator": {
-                "username": "admin",
-                "password": "password123",
-            },
         },
     )
 
@@ -266,14 +233,6 @@ async def test_setup_initialize_cannot_be_called_twice(
         json={
             "company": {
                 "name": "Evil Company",
-            },
-            "administrator": {
-                "username": (
-                    "second-admin"
-                ),
-                "password": (
-                    "password456"
-                ),
             },
         },
     )
@@ -315,10 +274,6 @@ async def test_invalid_setup_payload_does_not_change_installation_state(
         json={
             "company": {
                 "name": "   ",
-            },
-            "administrator": {
-                "username": "a",
-                "password": "123",
             },
         },
     )
