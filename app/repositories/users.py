@@ -45,3 +45,27 @@ async def create_user(
     await session.flush()
 
     return user
+
+
+async def get_system_administrators(
+    session: AsyncSession,
+) -> list[User]:
+    stmt = (
+        select(User)
+        .where(
+            User.is_system_admin.is_(
+                True
+            )
+        )
+        .order_by(
+            User.id.asc()
+        )
+    )
+
+    result = await session.execute(
+        stmt
+    )
+
+    return list(
+        result.scalars().all()
+    )

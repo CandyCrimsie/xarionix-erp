@@ -20,6 +20,10 @@ from services.system_roles import (
     sync_system_roles_for_company_in_transaction,
 )
 
+from services.system_admin_access import (
+    ensure_system_administrators_access_for_company_in_transaction,
+)
+
 from core.system_roles import (
     SystemRoleKey,
 )
@@ -640,6 +644,14 @@ async def _create_company_with_administrator(
             role_ids=[
                 administrator_role.id,
             ],
+        )
+
+
+        await (
+            ensure_system_administrators_access_for_company_in_transaction(
+                session,
+                company_id=company.id,
+            )
         )
 
 

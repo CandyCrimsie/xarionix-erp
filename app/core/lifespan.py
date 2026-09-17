@@ -24,6 +24,9 @@ from services.authorization import (
 from services.authorization_bootstrap import (
     sync_authorization_baseline,
 )
+from services.system_admin_access import (
+    sync_system_administrator_company_access,
+)
 
 
 @asynccontextmanager
@@ -54,6 +57,12 @@ async def lifespan(
     async with session_factory() as session:
         await sync_authorization_baseline(
             session
+        )
+
+        await (
+            sync_system_administrator_company_access(
+                session
+            )
         )
 
     print(
