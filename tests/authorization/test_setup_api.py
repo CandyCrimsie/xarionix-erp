@@ -171,6 +171,26 @@ async def test_setup_initialize_creates_first_installation(
         == 401
     )
 
+    me_response = await api_client.get(
+        "/api/v1/auth/me",
+        headers={
+            "Authorization": (
+                f"Bearer "
+                f"{login_response.json()['access_token']}"
+            ),
+        },
+    )
+
+
+    assert me_response.status_code == 200
+
+    assert (
+        me_response.json()[
+            "is_system_admin"
+        ]
+        is True
+    )
+
 
 @pytest.mark.asyncio
 async def test_setup_status_becomes_installed_after_initialization(
