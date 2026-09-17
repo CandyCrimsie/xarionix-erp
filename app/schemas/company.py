@@ -48,6 +48,12 @@ class CompanyChildCreate(BaseModel):
         return value or None
 
 
+class CompanyRootCreate(
+    CompanyChildCreate
+):
+    pass
+
+
 class CompanyCreate(
     CompanyChildCreate
 ):

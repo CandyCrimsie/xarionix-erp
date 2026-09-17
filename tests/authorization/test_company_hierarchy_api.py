@@ -18,6 +18,10 @@ from repositories.membership_roles import (
     get_membership_roles,
 )
 
+from repositories.users import (
+    get_user_by_id,
+)
+
 from schemas.company import (
     CompanyCreate,
 )
@@ -2142,5 +2146,226 @@ async def test_scoped_metadata_endpoint_rejects_hierarchy_fields(
         "detail": (
             "parent_id and is_active cannot "
             "be changed through metadata endpoint"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_system_administrator_can_create_independent_root_company(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+
+    first_company_id = (
+        setup["company_id"]
+    )
+
+
+    response = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name":
+                'АО "ВАСЬКА"',
+
+            "short_name":
+                "ВАСЬКА",
+        },
+        headers={
+            "Authorization": (
+                f"Bearer "
+                f"{login['access_token']}"
+            ),
+        },
+    )
+
+
+    assert response.status_code == 201
+
+
+    company = response.json()
+
+
+    assert (
+        company["parent_id"]
+        is None
+    )
+
+    assert (
+        company["name"]
+        == 'АО "ВАСЬКА"'
+    )
+
+    assert (
+        company["short_name"]
+        == "ВАСЬКА"
+    )
+
+    assert (
+        company["is_active"]
+        is True
+    )
+
+    assert (
+        company["id"]
+        != first_company_id
+    )
+
+
+    membership = (
+        await get_company_membership_by_user(
+            db_session,
+            company_id=(
+                company["id"]
+            ),
+            user_id=(
+                setup["user_id"]
+            ),
+        )
+    )
+
+
+    assert membership is not None
+
+    assert (
+        membership.is_active
+        is True
+    )
+
+
+    roles = await get_membership_roles(
+        db_session,
+        membership.id,
+    )
+
+
+    assert len(roles) == 1
+
+    assert (
+        roles[0].system_key
+        == (
+            SystemRoleKey
+            .ADMINISTRATOR
+            .value
+        )
+    )
+
+    companies_response = (
+        await api_client.get(
+            "/api/v1/me/companies",
+            headers={
+                "Authorization": (
+                    f"Bearer "
+                    f"{login['access_token']}"
+                ),
+            },
+        )
+    )
+
+
+    assert (
+        companies_response.status_code
+        == 200
+    )
+
+
+    company_ids = {
+        item["id"]
+        for item
+        in companies_response.json()
+    }
+
+
+    assert company_ids == {
+        first_company_id,
+        company["id"],
+    }
+
+    first_tree_response = (
+        await api_client.get(
+            (
+                f"/api/v1/companies/"
+                f"{first_company_id}/tree"
+            ),
+            headers={
+                "Authorization": (
+                    f"Bearer "
+                    f"{login['access_token']}"
+                ),
+                "X-Company-Id": (
+                    str(first_company_id)
+                ),
+            },
+        )
+    )
+
+
+    assert (
+        first_tree_response.status_code
+        == 200
+    )
+
+
+    assert (
+        first_tree_response
+        .json()["children"]
+        == []
+    )
+
+
+@pytest.mark.asyncio
+async def test_regular_user_cannot_create_independent_root_company(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = (
+        await initialize_and_login(
+            api_client
+        )
+    )
+
+
+    user = await get_user_by_id(
+        db_session,
+        setup["user_id"],
+    )
+
+
+    assert user is not None
+
+
+    user.is_system_admin = False
+
+    await db_session.commit()
+
+
+    response = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name":
+                "Unauthorized Company",
+        },
+        headers={
+            "Authorization": (
+                f"Bearer "
+                f"{login['access_token']}"
+            ),
+        },
+    )
+
+
+    assert response.status_code == 403
+
+    assert response.json() == {
+        "detail": (
+            "System administrator "
+            "access required"
         ),
     }

@@ -23,6 +23,12 @@ from dependencies.company import (
     ensure_company_matches_context,
 )
 from dependencies.database import get_session
+from dependencies.auth import (
+    CurrentAuth,
+)
+from dependencies.system_admin import (
+    require_system_admin,
+)
 
 from schemas.company import (
     CompanyActivationRequest,
@@ -31,6 +37,7 @@ from schemas.company import (
     CompanyResponse,
     CompanyTreeNodeResponse,
     CompanyUpdate,
+    CompanyRootCreate
 )
 
 from services.company import (
@@ -49,6 +56,7 @@ from services.company import (
     CompanyRootDeactivationForbiddenError,
     set_company_active_state_within_tree,
     update_company_metadata_within_tree,
+    create_root_company_with_administrator
 )
 
 
@@ -56,6 +64,52 @@ router = APIRouter(
     prefix="/companies",
     tags=["Companies"],
 )
+
+
+@router.post(
+    "",
+    response_model=CompanyResponse,
+    status_code=(
+        status.HTTP_201_CREATED
+    ),
+)
+async def create_root_company_endpoint(
+    data: CompanyRootCreate,
+
+    auth: Annotated[
+        CurrentAuth,
+        Depends(
+            require_system_admin
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> CompanyResponse:
+    try:
+        return (
+            await create_root_company_with_administrator(
+                session,
+                administrator_user_id=(
+                    auth.user.id
+                ),
+                data=data,
+            )
+        )
+
+    except (
+        CompanyAdministratorRoleUnavailableError
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail=(
+                "Company bootstrap failed"
+            ),
+        )
 
 
 @router.post(

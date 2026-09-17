@@ -12,6 +12,7 @@ from schemas.company import (
     CompanyCreate,
     CompanyTreeNodeResponse,
     CompanyUpdate,
+    CompanyRootCreate
 )
 
 from services.system_roles import (
@@ -570,25 +571,13 @@ async def create_new_company(
     return company
 
 
-async def create_child_company_with_administrator(
+async def _create_company_with_administrator(
     session: AsyncSession,
     *,
-    parent_company_id: int,
     administrator_user_id: int,
+    parent_company_id: int | None,
     data: CompanyChildCreate,
 ) -> Company:
-    parent = await get_company_by_id(
-        session,
-        parent_company_id,
-    )
-
-    if (
-        parent is None
-        or not parent.is_active
-    ):
-        raise ParentCompanyNotFoundError
-
-
     try:
         company = await create_company(
             session,
@@ -635,7 +624,9 @@ async def create_child_company_with_administrator(
         membership = (
             await create_company_membership(
                 session,
-                user_id=administrator_user_id,
+                user_id=(
+                    administrator_user_id
+                ),
                 company_id=company.id,
             )
         )
@@ -650,12 +641,8 @@ async def create_child_company_with_administrator(
                 administrator_role.id,
             ],
         )
-                #
-        # Company + system roles +
-        # creator membership +
-        # Administrator assignment
-        # фиксируются атомарно.
-        #
+
+
         await session.commit()
 
     except Exception:
@@ -667,7 +654,56 @@ async def create_child_company_with_administrator(
         company
     )
 
+
     return company
+
+
+async def create_child_company_with_administrator(
+    session: AsyncSession,
+    *,
+    parent_company_id: int,
+    administrator_user_id: int,
+    data: CompanyChildCreate,
+) -> Company:
+    parent = await get_company_by_id(
+        session,
+        parent_company_id,
+    )
+
+
+    if (
+        parent is None
+        or not parent.is_active
+    ):
+        raise ParentCompanyNotFoundError
+
+
+    return await _create_company_with_administrator(
+        session,
+        administrator_user_id=(
+            administrator_user_id
+        ),
+        parent_company_id=(
+            parent_company_id
+        ),
+        data=data,
+    )
+
+
+async def create_root_company_with_administrator(
+    session: AsyncSession,
+    *,
+    administrator_user_id: int,
+    data: CompanyRootCreate,
+) -> Company:
+    return await _create_company_with_administrator(
+        session,
+        administrator_user_id=(
+            administrator_user_id
+        ),
+        parent_company_id=None,
+        data=data,
+    )
 
 
 async def update_company(
