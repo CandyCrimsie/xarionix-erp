@@ -13,7 +13,8 @@ from .v1 import (
     role_permissions,
     membership_roles,
     membership_permission_overrides,
-    setup
+    setup,
+    invitations,
 )
 
 router = APIRouter()
@@ -31,3 +32,4 @@ router.include_router(role_permissions.router)
 router.include_router(membership_roles.router)
 router.include_router(membership_permission_overrides.router)
 router.include_router(setup.router)
+router.include_router(invitations.router)

@@ -1,6 +1,7 @@
 from pydantic import (
     Field,
     field_validator,
+    model_validator,
 )
 
 from pydantic_settings import (
@@ -40,6 +41,40 @@ class Config(BaseSettings):
         min_length=8,
         max_length=128,
     )
+
+    INVITATION_DEFAULT_EXPIRE_HOURS: int = Field(
+        default=72,
+        ge=1,
+        le=720,
+    )
+
+    INVITATION_MAX_EXPIRE_HOURS: int = Field(
+        default=720,
+        ge=1,
+        le=8760,
+    )
+
+    INVITATION_TOKEN_BYTES: int = Field(
+        default=32,
+        ge=32,
+        le=64,
+    )
+
+
+    @model_validator(mode="after")
+    def validate_invitation_expiration(
+        self,
+    ) -> "Config":
+        if (
+            self.INVITATION_DEFAULT_EXPIRE_HOURS
+            > self.INVITATION_MAX_EXPIRE_HOURS
+        ):
+            raise ValueError(
+                "Default invitation expiration cannot "
+                "exceed maximum invitation expiration"
+            )
+
+        return self
 
 
     @field_validator(

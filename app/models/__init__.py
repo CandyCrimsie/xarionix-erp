@@ -15,7 +15,8 @@ from models import (
     role_permissions,
     membership_roles,
     role_delegations,
-    membership_permission_overrides
+    membership_permission_overrides,
+    company_invitations,
 )
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "role_permissions",
     "membership_roles",
     "role_delegations",
-    "membership_permission_overrides"
+    "membership_permission_overrides",
+    "company_invitations",
 ]
