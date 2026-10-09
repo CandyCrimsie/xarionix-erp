@@ -10,6 +10,9 @@ class PermissionCode(StrEnum):
     COMPANIES_READ = "companies.read"
     COMPANIES_MANAGE = "companies.manage"
 
+    ADDRESSES_READ = "addresses.read"
+    ADDRESSES_MANAGE = "addresses.manage"
+
     ORGANIZATIONAL_UNITS_READ = "organizational_units.read"
     ORGANIZATIONAL_UNITS_MANAGE = "organizational_units.manage"
 
@@ -72,6 +75,27 @@ PERMISSION_DEFINITIONS = (
         name="Управление компаниями",
         module="companies",
         allowed_scopes=COMPANY_ONLY_SCOPES,
+    ),
+
+    PermissionDefinition(
+        code=PermissionCode.ADDRESSES_READ,
+        name="Просмотр адресного каталога",
+        module="addresses",
+        allowed_scopes=COMPANY_ONLY_SCOPES,
+        description=(
+            "Просмотр общего физического адресного каталога "
+            "и помещений текущей компании"
+        ),
+    ),
+    PermissionDefinition(
+        code=PermissionCode.ADDRESSES_MANAGE,
+        name="Управление адресным каталогом",
+        module="addresses",
+        allowed_scopes=COMPANY_ONLY_SCOPES,
+        description=(
+            "Изменение общего физического адресного каталога "
+            "и помещений текущей компании"
+        ),
     ),
 
     PermissionDefinition(

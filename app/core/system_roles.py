@@ -73,6 +73,15 @@ COMPANY_MANAGER_PERMISSIONS = (
     ),
 
     _permission(
+        PermissionCode.ADDRESSES_READ,
+        PermissionScope.COMPANY,
+    ),
+    _permission(
+        PermissionCode.ADDRESSES_MANAGE,
+        PermissionScope.COMPANY,
+    ),
+
+    _permission(
         PermissionCode.ORGANIZATIONAL_UNITS_READ,
         PermissionScope.COMPANY,
     ),
@@ -133,6 +142,11 @@ DEPARTMENT_MANAGER_PERMISSIONS = (
     ),
 
     _permission(
+        PermissionCode.ADDRESSES_READ,
+        PermissionScope.COMPANY,
+    ),
+
+    _permission(
         PermissionCode.ORGANIZATIONAL_UNITS_READ,
         PermissionScope.OWN_UNIT_TREE,
     ),
@@ -189,6 +203,11 @@ DEPARTMENT_MANAGER_PERMISSIONS = (
 EMPLOYEE_PERMISSIONS = (
     _permission(
         PermissionCode.COMPANIES_READ,
+        PermissionScope.COMPANY,
+    ),
+
+    _permission(
+        PermissionCode.ADDRESSES_READ,
         PermissionScope.COMPANY,
     ),
 

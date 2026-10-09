@@ -82,3 +82,13 @@ def test_roles_assign_supports_delegation():
         PermissionScope.OWN_UNIT_TREE,
         PermissionScope.COMPANY,
     }
+
+
+def test_addresses_permissions_are_company_context_only():
+    for permission in (
+        PermissionCode.ADDRESSES_READ,
+        PermissionCode.ADDRESSES_MANAGE,
+    ):
+        assert get_scopes(permission) == {
+            PermissionScope.COMPANY,
+        }

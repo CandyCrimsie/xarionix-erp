@@ -14,7 +14,10 @@ class Equipment(Base):
     )
     location_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("locations.id"),
+        ForeignKey(
+            "locations.id",
+            ondelete="RESTRICT",
+        ),
         nullable=False,
         index=True,
     )
