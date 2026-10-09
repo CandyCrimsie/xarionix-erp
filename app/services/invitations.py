@@ -146,8 +146,8 @@ async def get_public_invitation(
         invitation.company_id,
     )
 
-    if company is None:
-        raise InvitationNotFoundError
+    if company is None or not company.is_active:
+        raise InvitationCompanyUnavailableError
 
     return invitation, company
 

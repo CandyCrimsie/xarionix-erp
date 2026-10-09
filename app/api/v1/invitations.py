@@ -9,6 +9,7 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import config
 from core.permissions.codes import (
     PermissionCode,
 )
@@ -40,8 +41,10 @@ from schemas.invitations import (
     InvitationListScope,
     InvitationAcceptNewUserRequest,
     InvitationAcceptanceResponse,
+    InvitationPolicyResponse,
     InvitationPublicCompanyResponse,
     InvitationPublicResponse,
+    InvitationTokenRequest,
 )
 from services.invitations import (
     InvitationAcceptedError,
@@ -127,11 +130,27 @@ def _raise_acceptance_error(
 
 
 @router.get(
-    "/invitations/{token}",
+    "/invitations/policy",
+    response_model=InvitationPolicyResponse,
+)
+async def get_invitation_policy_endpoint(
+) -> InvitationPolicyResponse:
+    return InvitationPolicyResponse(
+        default_expire_hours=(
+            config.INVITATION_DEFAULT_EXPIRE_HOURS
+        ),
+        max_expire_hours=(
+            config.INVITATION_MAX_EXPIRE_HOURS
+        ),
+    )
+
+
+@router.post(
+    "/invitations/resolve",
     response_model=InvitationPublicResponse,
 )
 async def get_public_invitation_endpoint(
-    token: str,
+    data: InvitationTokenRequest,
     session: Annotated[
         AsyncSession,
         Depends(get_session),
@@ -141,7 +160,7 @@ async def get_public_invitation_endpoint(
         invitation, company = (
             await get_public_invitation(
                 session,
-                token=token,
+                token=data.token,
             )
         )
 
@@ -149,6 +168,12 @@ async def get_public_invitation_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invitation not found",
+        )
+
+    except InvitationCompanyUnavailableError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Company is inactive or unavailable",
         )
 
     return InvitationPublicResponse(
@@ -162,12 +187,11 @@ async def get_public_invitation_endpoint(
 
 
 @router.post(
-    "/invitations/{token}/accept",
+    "/invitations/accept",
     response_model=InvitationAcceptanceResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def accept_invitation_new_user_endpoint(
-    token: str,
     data: InvitationAcceptNewUserRequest,
     session: Annotated[
         AsyncSession,
@@ -178,7 +202,7 @@ async def accept_invitation_new_user_endpoint(
         user, company = (
             await accept_invitation_for_new_user(
                 session,
-                token=token,
+                token=data.token,
                 username=data.username,
                 password=data.password,
             )
@@ -201,12 +225,12 @@ async def accept_invitation_new_user_endpoint(
 
 
 @router.post(
-    "/invitations/{token}/accept-existing",
+    "/invitations/accept-existing",
     response_model=InvitationAcceptanceResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def accept_invitation_existing_user_endpoint(
-    token: str,
+    data: InvitationTokenRequest,
     auth: Annotated[
         CurrentAuth,
         Depends(get_current_auth),
@@ -220,7 +244,7 @@ async def accept_invitation_existing_user_endpoint(
         company = (
             await accept_invitation_for_existing_user(
                 session,
-                token=token,
+                token=data.token,
                 user_id=auth.user.id,
             )
         )

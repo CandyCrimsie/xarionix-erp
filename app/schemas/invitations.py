@@ -68,10 +68,25 @@ class InvitationPublicResponse(BaseModel):
     status: InvitationStatus
 
 
+class InvitationPolicyResponse(BaseModel):
+    default_expire_hours: int
+    max_expire_hours: int
+
+
+class InvitationTokenRequest(BaseModel):
+    token: str = Field(
+        min_length=1,
+        max_length=512,
+    )
+
+
 class InvitationAcceptNewUserRequest(
     UserCreate
 ):
-    pass
+    token: str = Field(
+        min_length=1,
+        max_length=512,
+    )
 
 
 class InvitationAcceptanceResponse(BaseModel):

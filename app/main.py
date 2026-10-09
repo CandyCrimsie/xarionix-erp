@@ -4,9 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.lifespan import lifespan
 from core.config import config
-from core.security.sensitive_path import (
-    RedactInvitationTokenPathMiddleware,
-)
 from api.routers import router
 
 
@@ -22,10 +19,6 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
-)
-
-app.add_middleware(
-    RedactInvitationTokenPathMiddleware,
 )
 
 app.include_router(router, prefix="/api/v1")

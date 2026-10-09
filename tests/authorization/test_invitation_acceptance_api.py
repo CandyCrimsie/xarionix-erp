@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from core.config import config
+from models.company import Company
 from models.company_invitations import CompanyInvitation
 from models.company_memberships import CompanyMembership
 from models.users import User
@@ -91,6 +93,46 @@ async def create_invitation(
 
 
 @pytest.mark.asyncio
+async def test_public_invitation_policy_comes_from_backend_config(
+    api_client: AsyncClient,
+):
+    response = await api_client.get(
+        "/api/v1/invitations/policy"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "default_expire_hours": (
+            config.INVITATION_DEFAULT_EXPIRE_HOURS
+        ),
+        "max_expire_hours": (
+            config.INVITATION_MAX_EXPIRE_HOURS
+        ),
+    }
+
+    openapi_response = await api_client.get(
+        "/openapi.json"
+    )
+
+    invitation_paths = {
+        path
+        for path in openapi_response.json()["paths"]
+        if path.startswith("/api/v1/invitations")
+    }
+
+    assert invitation_paths == {
+        "/api/v1/invitations/policy",
+        "/api/v1/invitations/resolve",
+        "/api/v1/invitations/accept",
+        "/api/v1/invitations/accept-existing",
+    }
+    assert all(
+        "{token}" not in path
+        for path in invitation_paths
+    )
+
+
+@pytest.mark.asyncio
 async def test_public_invitation_validation_returns_only_safe_data(
     api_client: AsyncClient,
     clean_test_redis,
@@ -105,11 +147,17 @@ async def test_public_invitation_validation_returns_only_safe_data(
         company_id=setup["company_id"],
     )
 
-    response = await api_client.get(
-        f"/api/v1/invitations/{created['token']}"
+    response = await api_client.post(
+        "/api/v1/invitations/resolve",
+        json={
+            "token": created["token"],
+        },
     )
 
     assert response.status_code == 200
+    assert created["token"] not in str(
+        response.request.url
+    )
     assert response.json() == {
         "company": {
             "name": "Main Company",
@@ -117,6 +165,44 @@ async def test_public_invitation_validation_returns_only_safe_data(
         },
         "expires_at": created["expires_at"],
         "status": "pending",
+    }
+
+
+@pytest.mark.asyncio
+async def test_inactive_company_invitation_cannot_be_resolved(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, access_token = (
+        await initialize_and_login_admin(api_client)
+    )
+
+    created = await create_invitation(
+        api_client,
+        access_token=access_token,
+        company_id=setup["company_id"],
+    )
+
+    company = await db_session.get(
+        Company,
+        setup["company_id"],
+    )
+
+    assert company is not None
+    company.is_active = False
+    await db_session.commit()
+
+    response = await api_client.post(
+        "/api/v1/invitations/resolve",
+        json={
+            "token": created["token"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Company is inactive or unavailable",
     }
 
 
@@ -138,14 +224,18 @@ async def test_new_user_acceptance_is_atomic_and_cannot_be_reused(
     )
 
     response = await api_client.post(
-        f"/api/v1/invitations/{created['token']}/accept",
+        "/api/v1/invitations/accept",
         json={
+            "token": created["token"],
             "username": "  New.Employee  ",
             "password": "password123",
         },
     )
 
     assert response.status_code == 201
+    assert created["token"] not in str(
+        response.request.url
+    )
     assert response.json()["user"]["username"] == (
         "new.employee"
     )
@@ -179,8 +269,9 @@ async def test_new_user_acceptance_is_atomic_and_cannot_be_reused(
     assert invitation.accepted_by_user_id == user.id
 
     reuse_response = await api_client.post(
-        f"/api/v1/invitations/{created['token']}/accept",
+        "/api/v1/invitations/accept",
         json={
+            "token": created["token"],
             "username": "another-user",
             "password": "password123",
         },
@@ -222,8 +313,9 @@ async def test_expired_and_revoked_invitations_are_rejected(
     await db_session.commit()
 
     expired_response = await api_client.post(
-        f"/api/v1/invitations/{expired['token']}/accept",
+        "/api/v1/invitations/accept",
         json={
+            "token": expired["token"],
             "username": "expired-user",
             "password": "password123",
         },
@@ -253,8 +345,9 @@ async def test_expired_and_revoked_invitations_are_rejected(
     assert revoke_response.status_code == 200
 
     revoked_response = await api_client.post(
-        f"/api/v1/invitations/{revoked['token']}/accept",
+        "/api/v1/invitations/accept",
         json={
+            "token": revoked["token"],
             "username": "revoked-user",
             "password": "password123",
         },
@@ -448,14 +541,17 @@ async def test_existing_user_joins_another_company_without_duplication(
     user_token = login_response.json()["access_token"]
 
     response = await api_client.post(
-        (
-            f"/api/v1/invitations/{invitation['token']}"
-            "/accept-existing"
-        ),
+        "/api/v1/invitations/accept-existing",
+        json={
+            "token": invitation["token"],
+        },
         headers=auth_headers(user_token),
     )
 
     assert response.status_code == 201
+    assert invitation["token"] not in str(
+        response.request.url
+    )
     assert response.json()["user"]["id"] == user.id
     assert response.json()["company_id"] == company_b_id
 
@@ -511,10 +607,10 @@ async def test_existing_member_conflict_does_not_consume_invitation(
     )
 
     response = await api_client.post(
-        (
-            f"/api/v1/invitations/{invitation['token']}"
-            "/accept-existing"
-        ),
+        "/api/v1/invitations/accept-existing",
+        json={
+            "token": invitation["token"],
+        },
         headers=auth_headers(admin_token),
     )
 
@@ -562,8 +658,9 @@ async def test_invitation_creates_membership_only_in_its_company(
     )
 
     response = await api_client.post(
-        f"/api/v1/invitations/{invitation['token']}/accept",
+        "/api/v1/invitations/accept",
         json={
+            "token": invitation["token"],
             "username": "company-a-user",
             "password": "password123",
         },
