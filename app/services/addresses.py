@@ -98,6 +98,33 @@ class LocationNotEmptyError(Exception):
     pass
 
 
+FOREIGN_KEY_VIOLATION_SQLSTATE = "23503"
+
+
+def _is_foreign_key_violation(error: IntegrityError) -> bool:
+    original = error.orig
+    sqlstate = getattr(original, "sqlstate", None)
+    if sqlstate is None:
+        sqlstate = getattr(original, "pgcode", None)
+    if sqlstate is None:
+        sqlstate = getattr(getattr(original, "diag", None), "sqlstate", None)
+    return sqlstate == FOREIGN_KEY_VIOLATION_SQLSTATE
+
+
+async def _commit_delete(
+    session: AsyncSession,
+    *,
+    dependent_error: type[Exception],
+) -> None:
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        if _is_foreign_key_violation(exc):
+            raise dependent_error from exc
+        raise
+
+
 def address_object_response(
     record: AddressObjectRecord,
 ) -> AddressObjectResponse:
@@ -260,7 +287,10 @@ async def delete_address_object(
     if await address_object_has_children_or_buildings(session, address_object_id):
         raise AddressObjectNotEmptyError
     await session.delete(record.address_object)
-    await session.commit()
+    await _commit_delete(
+        session,
+        dependent_error=AddressObjectNotEmptyError,
+    )
 
 
 async def get_buildings(
@@ -367,7 +397,10 @@ async def delete_building(
     if await building_has_entrances_or_locations(session, building_id):
         raise BuildingNotEmptyError
     await session.delete(building)
-    await session.commit()
+    await _commit_delete(
+        session,
+        dependent_error=BuildingNotEmptyError,
+    )
 
 
 async def get_entrances(
@@ -430,7 +463,10 @@ async def delete_entrance(
     if await entrance_has_locations(session, entrance_id):
         raise EntranceNotEmptyError
     await session.delete(entrance)
-    await session.commit()
+    await _commit_delete(
+        session,
+        dependent_error=EntranceNotEmptyError,
+    )
 
 
 async def get_locations(
@@ -528,7 +564,10 @@ async def delete_location(
     if await location_has_equipment(session, location_id):
         raise LocationNotEmptyError
     await session.delete(location)
-    await session.commit()
+    await _commit_delete(
+        session,
+        dependent_error=LocationNotEmptyError,
+    )
 
 
 async def search_addresses(

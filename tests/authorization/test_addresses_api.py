@@ -2,14 +2,20 @@ import pytest
 
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.permissions.scopes import PermissionScope
+from models.buildings import Building
 from models.company_memberships import CompanyMembership
+from models.entrances import Entrance
+from models.equipment import Equipment
+from models.locations import Location
 from models.membership_roles import MembershipRole
 from models.permissions import Permission
 from models.role_permissions import RolePermission
 from models.roles import Role
+from services import addresses as address_service
 from services.address_types import sync_system_address_types
 from services.auth import register_user
 
@@ -50,6 +56,26 @@ def company_headers(token: str, company_id: int) -> dict[str, str]:
         "Authorization": f"Bearer {token}",
         "X-Company-Id": str(company_id),
     }
+
+
+def test_delete_conflict_classifier_only_accepts_foreign_key_violations():
+    class DatabaseError(Exception):
+        def __init__(self, sqlstate: str):
+            self.sqlstate = sqlstate
+
+    foreign_key_error = IntegrityError(
+        "DELETE",
+        {},
+        DatabaseError("23503"),
+    )
+    unique_error = IntegrityError(
+        "DELETE",
+        {},
+        DatabaseError("23505"),
+    )
+
+    assert address_service._is_foreign_key_violation(foreign_key_error)
+    assert not address_service._is_foreign_key_violation(unique_error)
 
 
 async def create_object(
@@ -389,6 +415,164 @@ async def test_entrances_locations_integrity_and_safe_deletion(
 
 
 @pytest.mark.asyncio
+async def test_delete_endpoints_map_concurrent_fk_conflicts_to_http_409(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company_id, token, types = await initialize_address_context(db_session, api_client)
+    headers = company_headers(token, company_id)
+    city, street = await create_standard_path(api_client, headers, types)
+    leaf_street = await create_object(
+        api_client,
+        headers,
+        type_id=types["street"],
+        name="Гагарина",
+        parent_id=city["id"],
+    )
+    empty_building = (
+        await create_building_request(
+            api_client,
+            headers,
+            street["id"],
+            number="17",
+        )
+    ).json()
+    occupied_building = (
+        await create_building_request(
+            api_client,
+            headers,
+            street["id"],
+            number="19",
+        )
+    ).json()
+    empty_entrance = (
+        await api_client.post(
+            f"/api/v1/buildings/{occupied_building['id']}/entrances",
+            headers=headers,
+            json={"number": "1"},
+        )
+    ).json()
+    empty_location = (
+        await api_client.post(
+            "/api/v1/locations",
+            headers=headers,
+            json={
+                "building_id": occupied_building["id"],
+                "entrance_id": None,
+                "floor": "-1",
+                "name": "Серверная",
+            },
+        )
+    ).json()
+
+    async def add_building_after_check(
+        session: AsyncSession,
+        address_object_id: int,
+    ) -> bool:
+        session.add(
+            Building(
+                address_object_id=address_object_id,
+                number="99",
+                normalized_number="99",
+                normalized_corpus="",
+                normalized_structure="",
+            )
+        )
+        await session.flush()
+        return False
+
+    monkeypatch.setattr(
+        address_service,
+        "address_object_has_children_or_buildings",
+        add_building_after_check,
+    )
+    address_delete = await api_client.delete(
+        f"/api/v1/address-objects/{leaf_street['id']}",
+        headers=headers,
+    )
+    assert address_delete.status_code == 409
+    assert address_delete.json()["detail"] == "Address record has dependent data"
+
+    async def add_entrance_after_check(
+        session: AsyncSession,
+        building_id: int,
+    ) -> bool:
+        session.add(
+            Entrance(
+                building_id=building_id,
+                number="race",
+                normalized_number="race",
+            )
+        )
+        await session.flush()
+        return False
+
+    monkeypatch.setattr(
+        address_service,
+        "building_has_entrances_or_locations",
+        add_entrance_after_check,
+    )
+    building_delete = await api_client.delete(
+        f"/api/v1/buildings/{empty_building['id']}",
+        headers=headers,
+    )
+    assert building_delete.status_code == 409
+    assert building_delete.json()["detail"] == "Address record has dependent data"
+
+    async def add_location_after_check(
+        session: AsyncSession,
+        entrance_id: int,
+    ) -> bool:
+        entrance = await session.get(Entrance, entrance_id)
+        assert entrance is not None
+        session.add(
+            Location(
+                company_id=company_id,
+                building_id=entrance.building_id,
+                entrance_id=entrance_id,
+                floor="1",
+                name="Race location",
+            )
+        )
+        await session.flush()
+        return False
+
+    monkeypatch.setattr(
+        address_service,
+        "entrance_has_locations",
+        add_location_after_check,
+    )
+    entrance_delete = await api_client.delete(
+        f"/api/v1/entrances/{empty_entrance['id']}",
+        headers=headers,
+    )
+    assert entrance_delete.status_code == 409
+    assert entrance_delete.json()["detail"] == "Address record has dependent data"
+
+    async def add_equipment_after_check(
+        session: AsyncSession,
+        location_id: int,
+    ) -> bool:
+        session.add(Equipment(location_id=location_id, name="Race equipment"))
+        await session.flush()
+        return False
+
+    monkeypatch.setattr(
+        address_service,
+        "location_has_equipment",
+        add_equipment_after_check,
+    )
+    location_delete = await api_client.delete(
+        f"/api/v1/locations/{empty_location['id']}",
+        headers=headers,
+    )
+    assert location_delete.status_code == 409
+    assert location_delete.json()["detail"] == "Address record has dependent data"
+
+
+@pytest.mark.asyncio
 async def test_locations_are_isolated_by_company_context(
     db_session: AsyncSession,
     api_client: AsyncClient,
@@ -421,6 +605,28 @@ async def test_locations_are_isolated_by_company_context(
     assert company_b_response.status_code == 201, company_b_response.text
     company_b = company_b_response.json()["id"]
     headers_b = company_headers(token, company_b)
+
+    catalog_b = await api_client.get(
+        "/api/v1/address-objects",
+        headers=headers_b,
+    )
+    assert catalog_b.status_code == 200
+    assert [item["id"] for item in catalog_b.json()] == [
+        street["parent_id"]
+    ]
+
+    global_update = await api_client.patch(
+        f"/api/v1/address-objects/{street['id']}",
+        headers=headers_b,
+        json={"name": "Ленина Общая"},
+    )
+    assert global_update.status_code == 200
+    catalog_a = await api_client.get(
+        f"/api/v1/address-objects/{street['id']}",
+        headers=headers_a,
+    )
+    assert catalog_a.status_code == 200
+    assert catalog_a.json()["name"] == "Ленина Общая"
 
     list_b = await api_client.get(
         f"/api/v1/buildings/{building['id']}/locations",
