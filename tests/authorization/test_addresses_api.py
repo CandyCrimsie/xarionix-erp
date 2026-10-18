@@ -58,7 +58,7 @@ def company_headers(token: str, company_id: int) -> dict[str, str]:
     }
 
 
-def test_delete_conflict_classifier_only_accepts_foreign_key_violations():
+def test_delete_conflict_classifier_accepts_dependent_data_violations():
     class DatabaseError(Exception):
         def __init__(self, sqlstate: str):
             self.sqlstate = sqlstate
@@ -68,14 +68,20 @@ def test_delete_conflict_classifier_only_accepts_foreign_key_violations():
         {},
         DatabaseError("23503"),
     )
+    restrict_error = IntegrityError(
+        "DELETE",
+        {},
+        DatabaseError("23001"),
+    )
     unique_error = IntegrityError(
         "DELETE",
         {},
         DatabaseError("23505"),
     )
 
-    assert address_service._is_foreign_key_violation(foreign_key_error)
-    assert not address_service._is_foreign_key_violation(unique_error)
+    assert address_service._is_dependent_data_violation(foreign_key_error)
+    assert address_service._is_dependent_data_violation(restrict_error)
+    assert not address_service._is_dependent_data_violation(unique_error)
 
 
 async def create_object(

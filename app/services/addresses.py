@@ -98,17 +98,22 @@ class LocationNotEmptyError(Exception):
     pass
 
 
-FOREIGN_KEY_VIOLATION_SQLSTATE = "23503"
+DEPENDENT_DATA_VIOLATION_SQLSTATES = frozenset(
+    {
+        "23001",  # restrict_violation
+        "23503",  # foreign_key_violation
+    }
+)
 
 
-def _is_foreign_key_violation(error: IntegrityError) -> bool:
+def _is_dependent_data_violation(error: IntegrityError) -> bool:
     original = error.orig
     sqlstate = getattr(original, "sqlstate", None)
     if sqlstate is None:
         sqlstate = getattr(original, "pgcode", None)
     if sqlstate is None:
         sqlstate = getattr(getattr(original, "diag", None), "sqlstate", None)
-    return sqlstate == FOREIGN_KEY_VIOLATION_SQLSTATE
+    return sqlstate in DEPENDENT_DATA_VIOLATION_SQLSTATES
 
 
 async def _commit_delete(
@@ -120,7 +125,7 @@ async def _commit_delete(
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
-        if _is_foreign_key_violation(exc):
+        if _is_dependent_data_violation(exc):
             raise dependent_error from exc
         raise
 
