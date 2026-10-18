@@ -37,36 +37,77 @@ sys.path.insert(
 #
 # Test application configuration.
 #
-# Это выполняется ДО imports из app.
+# Это выполняется ДО imports из app. TEST_* variables позволяют запускать
+# один и тот же набор тестов локально и с service-контейнерами GitLab CI.
+# Значения по умолчанию соответствуют docker-compose.test.yml.
 #
+
+test_postgres_user = os.getenv(
+    "TEST_POSTGRES_USER",
+    "xarionix_test",
+)
+test_postgres_password = os.getenv(
+    "TEST_POSTGRES_PASSWORD",
+    "xarionix_test",
+)
+test_postgres_db = os.getenv(
+    "TEST_POSTGRES_DB",
+    "xarionix_test",
+)
+test_postgres_host = os.getenv(
+    "TEST_POSTGRES_HOST",
+    "127.0.0.1",
+)
+test_postgres_port = os.getenv(
+    "TEST_POSTGRES_PORT",
+    "55432",
+)
+
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    (
+        "postgresql+psycopg://"
+        f"{test_postgres_user}:"
+        f"{test_postgres_password}"
+        f"@{test_postgres_host}:"
+        f"{test_postgres_port}/"
+        f"{test_postgres_db}"
+    ),
+)
+
+test_redis_host = os.getenv(
+    "TEST_REDIS_HOST",
+    "127.0.0.1",
+)
+test_redis_port = os.getenv(
+    "TEST_REDIS_PORT",
+    "56379",
+)
+test_redis_password = os.getenv(
+    "TEST_REDIS_PASSWORD",
+    "xarionix_test",
+)
+test_redis_db = os.getenv(
+    "TEST_REDIS_DB",
+    "0",
+)
 
 os.environ["HOST"] = "127.0.0.1"
 os.environ["PORT"] = "8000"
 
-os.environ["POSTGRES_USER"] = (
-    "xarionix_test"
-)
+os.environ["POSTGRES_USER"] = test_postgres_user
 os.environ["POSTGRES_PASSWORD"] = (
-    "xarionix_test"
+    test_postgres_password
 )
-os.environ["POSTGRES_DB"] = (
-    "xarionix_test"
-)
+os.environ["POSTGRES_DB"] = test_postgres_db
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
-os.environ["DATABASE_URL"] = (
-    "postgresql+psycopg://"
-    "xarionix_test:"
-    "xarionix_test"
-    "@127.0.0.1:55432/"
-    "xarionix_test"
-)
-
-os.environ["REDIS_HOST"] = "127.0.0.1"
-os.environ["REDIS_PORT"] = "56379"
+os.environ["REDIS_HOST"] = test_redis_host
+os.environ["REDIS_PORT"] = test_redis_port
 os.environ["REDIS_PASSWORD"] = (
-    "xarionix_test"
+    test_redis_password
 )
-os.environ["REDIS_DB"] = "0"
+os.environ["REDIS_DB"] = test_redis_db
 
 os.environ["JWT_SECRET"] = (
     "0123456789abcdef0123456789abcdef"
@@ -109,11 +150,6 @@ from dependencies.database import (
 )  # noqa: E402
 
 from main import app  # noqa: E402
-
-
-TEST_DATABASE_URL = os.environ[
-    "DATABASE_URL"
-]
 
 
 @pytest_asyncio.fixture(
