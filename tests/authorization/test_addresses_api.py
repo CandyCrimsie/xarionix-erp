@@ -331,6 +331,169 @@ async def test_building_uniqueness_coordinates_and_full_address_search(
 
 
 @pytest.mark.asyncio
+async def test_smart_address_search_uses_postgresql_matching_and_ranking(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    company_id, token, types = await initialize_address_context(
+        db_session, api_client
+    )
+    headers = company_headers(token, company_id)
+
+    _, ramenskoe_gagarina = await create_standard_path(
+        api_client,
+        headers,
+        types,
+        city_name="Раменское",
+        street_name="Гагарина",
+    )
+    _, ramenskoe_typo_street = await create_standard_path(
+        api_client,
+        headers,
+        types,
+        city_name="Жуковский",
+        street_name="Гагарена",
+    )
+    _, moscow_gagarina = await create_standard_path(
+        api_client,
+        headers,
+        types,
+        city_name="Москва",
+        street_name="Гагарина",
+    )
+    moscow = moscow_gagarina["parent_id"]
+    moscow_lenina = await create_object(
+        api_client,
+        headers,
+        type_id=types["street"],
+        name="Ленина",
+        parent_id=moscow,
+    )
+    _, orel_elochnaya = await create_standard_path(
+        api_client,
+        headers,
+        types,
+        city_name="Орёл",
+        street_name="Ёлочная",
+    )
+
+    async def create(street_id: int, number: str, **parts: str) -> dict:
+        response = await create_building_request(
+            api_client,
+            headers,
+            street_id,
+            number=number,
+            corpus=parts.get("corpus"),
+            structure=parts.get("structure"),
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    ram_51 = await create(ramenskoe_gagarina["id"], "51")
+    ram_53 = await create(ramenskoe_gagarina["id"], "53")
+    ram_53_corpus = await create(ramenskoe_gagarina["id"], "53", corpus="2")
+    ram_53_structure = await create(
+        ramenskoe_gagarina["id"], "53", structure="2"
+    )
+    await create(ramenskoe_gagarina["id"], "153")
+    typo_53 = await create(ramenskoe_typo_street["id"], "53")
+    moscow_53 = await create(moscow_gagarina["id"], "53")
+    moscow_15 = await create(moscow_lenina["id"], "15")
+    orel_1 = await create(orel_elochnaya["id"], "1")
+
+    async def search(query: str, *, limit: int = 20, offset: int = 0) -> dict:
+        response = await api_client.get(
+            "/api/v1/addresses/search",
+            headers=headers,
+            params={"q": query, "limit": limit, "offset": offset},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    for query in (
+        "рам гагар 53",
+        "раменское гагарина 53",
+        "гагар 53 рам",
+        "Раменское, ул. Гагарина, д. 53",
+        "ГАгарИНА 53 РАМЕНСКОЕ",
+        "Гагарина,    53 Раменское",
+    ):
+        result = await search(query)
+        assert [item["id"] for item in result["items"][:2]] == [
+            ram_53["id"],
+            ram_53_corpus["id"],
+        ]
+        assert all(item["number"] == "53" for item in result["items"])
+
+    for query in ("рам гагар 53 корп 2", "рам гагар 53 к2"):
+        result = await search(query)
+        assert [item["id"] for item in result["items"]] == [
+            ram_53_corpus["id"]
+        ]
+
+    structure_result = await search(
+        "раменское гагарина 53 строение 2"
+    )
+    assert [item["id"] for item in structure_result["items"]] == [
+        ram_53_structure["id"]
+    ]
+
+    street_result = await search("рам гагар")
+    assert street_result["total"] == 5
+    assert {item["id"] for item in street_result["items"]} >= {
+        ram_51["id"],
+        ram_53["id"],
+    }
+
+    cross_city = await search("гагарина 53")
+    assert {ram_53["id"], moscow_53["id"]}.issubset(
+        {item["id"] for item in cross_city["items"]}
+    )
+    assert all(item["number"] == "53" for item in cross_city["items"])
+
+    fuzzy = await search("раменское гагарена 53")
+    assert fuzzy["items"][0]["id"] == ram_53["id"]
+
+    exact_before_fuzzy = await search("гагарина 53")
+    exact_ids = [item["id"] for item in exact_before_fuzzy["items"]]
+    assert exact_ids.index(ram_53["id"]) < exact_ids.index(typo_53["id"])
+
+    lenina = await search("мос лен 15")
+    assert [item["id"] for item in lenina["items"]] == [moscow_15["id"]]
+
+    yo_result = await search("орел елоч 1")
+    assert [item["id"] for item in yo_result["items"]] == [orel_1["id"]]
+
+    first_page = await search("гагар 53", limit=2)
+    second_page = await search("гагар 53", limit=2, offset=2)
+    repeated_first_page = await search("гагар 53", limit=2)
+    assert first_page["total"] == 5
+    assert first_page["limit"] == 2
+    assert first_page["offset"] == 0
+    assert second_page["offset"] == 2
+    assert first_page["items"] == repeated_first_page["items"]
+    assert not (
+        {item["id"] for item in first_page["items"]}
+        & {item["id"] for item in second_page["items"]}
+    )
+
+    injection = await search("'; DROP TABLE buildings; --")
+    assert injection["items"] == []
+    still_available = await search("мос лен 15")
+    assert still_available["items"][0]["id"] == moscow_15["id"]
+    assert "company_id" not in still_available["items"][0]
+    assert "locations" not in still_available["items"][0]
+
+    too_many_tokens = await api_client.get(
+        "/api/v1/addresses/search",
+        headers=headers,
+        params={"q": " ".join(f"слово{index}" for index in range(13))},
+    )
+    assert too_many_tokens.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_entrances_locations_integrity_and_safe_deletion(
     db_session: AsyncSession,
     api_client: AsyncClient,
@@ -693,12 +856,46 @@ async def test_address_permissions_enforce_read_and_manage(
     assert (
         await api_client.get("/api/v1/address-objects", headers=reader_headers)
     ).status_code == 200
+    assert (
+        await api_client.get(
+            "/api/v1/addresses/search",
+            headers=reader_headers,
+            params={"q": "Москва"},
+        )
+    ).status_code == 200
     denied = await api_client.post(
         "/api/v1/address-objects",
         headers=reader_headers,
         json={"parent_id": None, "type_id": types["city"], "name": "Москва"},
     )
     assert denied.status_code == 403
+
+    user_without_access = await register_user(
+        db_session,
+        username="address-no-access",
+        password="password123",
+    )
+    db_session.add(
+        CompanyMembership(
+            user_id=user_without_access.id,
+            company_id=company_id,
+        )
+    )
+    await db_session.commit()
+    no_access_login = await api_client.post(
+        "/api/v1/auth/login",
+        json={"username": "address-no-access", "password": "password123"},
+    )
+    no_access_headers = company_headers(
+        no_access_login.json()["access_token"],
+        company_id,
+    )
+    denied_search = await api_client.get(
+        "/api/v1/addresses/search",
+        headers=no_access_headers,
+        params={"q": "Москва"},
+    )
+    assert denied_search.status_code == 403
 
     no_context = await api_client.get(
         "/api/v1/address-objects",

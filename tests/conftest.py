@@ -9,6 +9,7 @@ from httpx import (
 )
 
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -175,6 +176,9 @@ async def db_session():
     # чистую схему.
     #
     async with engine.begin() as connection:
+        await connection.execute(
+            text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+        )
         await connection.run_sync(
             Base.metadata.drop_all
         )

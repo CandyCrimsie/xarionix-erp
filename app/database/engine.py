@@ -19,6 +19,9 @@ async def initialize_database() -> None:
 
     async with engine.begin() as connection:
         await connection.execute(text("SELECT 1"))
+        await connection.execute(
+            text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+        )
         await connection.run_sync(Base.metadata.create_all)
 
 

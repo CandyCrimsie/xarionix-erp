@@ -2,6 +2,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.address_normalization import normalize_address_value
+from core.address_search import parse_address_search_query
 from models.address_objects import AddressObject
 from models.buildings import Building
 from models.entrances import Entrance
@@ -582,15 +583,19 @@ async def search_addresses(
     limit: int,
     offset: int,
 ) -> AddressSearchResponse:
-    normalized = normalize_address_value(query)
-    tokens = [token for token in normalized.split(" ") if token]
-    if not tokens:
+    parsed_query = parse_address_search_query(query)
+    if not (
+        parsed_query.name_tokens
+        or parsed_query.house_number
+        or parsed_query.corpus
+        or parsed_query.structure
+    ):
         return AddressSearchResponse(
             items=[], total=0, limit=limit, offset=offset
         )
     records, total = await search_building_records(
         session,
-        tokens=tokens,
+        query=parsed_query,
         limit=limit,
         offset=offset,
     )

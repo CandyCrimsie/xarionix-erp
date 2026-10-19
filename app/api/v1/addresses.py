@@ -10,6 +10,7 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.address_search import AddressSearchQueryTooComplexError
 from core.permissions.codes import PermissionCode
 from core.permissions.scopes import PermissionScope
 from dependencies.authorization import require_permission
@@ -595,11 +596,17 @@ async def search_addresses_endpoint(
     _context: AddressReadContext,
     q: Annotated[str, Query(min_length=1, max_length=255)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
 ) -> AddressSearchResponse:
-    return await search_addresses(
-        session,
-        query=q,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        return await search_addresses(
+            session,
+            query=q,
+            limit=limit,
+            offset=offset,
+        )
+    except AddressSearchQueryTooComplexError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc

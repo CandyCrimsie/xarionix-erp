@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import (
@@ -7,10 +8,16 @@ from sqlalchemy import (
     cast,
     func,
     literal,
+    or_,
     select,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.address_search import (
+    AddressSearchQuery,
+    FUZZY_MIN_TOKEN_LENGTH,
+    FUZZY_SIMILARITY_THRESHOLD,
+)
 from models.address_objects import AddressObject
 from models.address_types import (
     AddressType,
@@ -196,6 +203,9 @@ def _address_paths_cte():
             AddressObject.id.label("object_id"),
             cast(segment, Text).label("display_path"),
             cast(AddressObject.normalized_name, Text).label("normalized_path"),
+            cast(AddressObject.normalized_name, Text).label(
+                "normalized_leaf_name"
+            ),
         )
         .join(AddressType, AddressType.id == AddressObject.type_id)
         .where(AddressObject.parent_id.is_(None))
@@ -234,6 +244,7 @@ def _address_paths_cte():
                 " ",
                 child_object.c.normalized_name,
             ),
+            cast(child_object.c.normalized_name, Text),
         )
         .select_from(child_object)
         .join(
@@ -315,22 +326,65 @@ async def get_building_record(
 async def search_building_records(
     session: AsyncSession,
     *,
-    tokens: list[str],
+    query: AddressSearchQuery,
     limit: int,
     offset: int,
 ) -> tuple[list[BuildingRecord], int]:
     paths = _address_paths_cte()
-    searchable = func.concat(
-        paths.c.normalized_path,
-        " ",
-        Building.normalized_number,
-        " дом ",
-        Building.normalized_corpus,
-        " корпус ",
-        Building.normalized_structure,
-        " строение",
+    searchable_names = func.replace(paths.c.normalized_path, "ё", "е")
+    searchable_leaf_name = func.replace(
+        paths.c.normalized_leaf_name,
+        "ё",
+        "е",
     )
-    filters = [searchable.contains(token) for token in tokens]
+    filters = []
+    relevance = literal(0.0)
+
+    for token in query.name_tokens:
+        escaped_token = re.escape(token)
+        exact_word = searchable_names.regexp_match(
+            rf"(^| ){escaped_token}($| )"
+        )
+        exact_leaf = searchable_leaf_name == token
+        word_prefix = searchable_names.regexp_match(
+            rf"(^| ){escaped_token}"
+        )
+        leaf_prefix = searchable_leaf_name.startswith(token)
+        substring = searchable_names.contains(token)
+        similarity = func.word_similarity(token, searchable_names)
+        fuzzy = (
+            similarity >= FUZZY_SIMILARITY_THRESHOLD
+            if len(token) >= FUZZY_MIN_TOKEN_LENGTH and token.isalpha()
+            else literal(False)
+        )
+        filters.append(or_(substring, fuzzy))
+        relevance += case(
+            (exact_leaf, 50.0),
+            (exact_word, 40.0),
+            (leaf_prefix, 30.0),
+            (word_prefix, 24.0),
+            (substring, 10.0),
+            (fuzzy, similarity * 8.0),
+            else_=0.0,
+        )
+
+    if query.house_number is not None:
+        filters.append(Building.normalized_number == query.house_number)
+        relevance += 120.0
+    if query.corpus is not None:
+        filters.append(Building.normalized_corpus == query.corpus)
+        relevance += 50.0
+    else:
+        relevance += case((Building.normalized_corpus == "", 2.0), else_=0.0)
+    if query.structure is not None:
+        filters.append(Building.normalized_structure == query.structure)
+        relevance += 45.0
+    else:
+        relevance += case((Building.normalized_structure == "", 4.0), else_=0.0)
+
+    if not filters:
+        return [], 0
+
     base = (
         select(Building.id)
         .join(paths, paths.c.object_id == Building.address_object_id)
@@ -343,10 +397,18 @@ async def search_building_records(
         select(
             Building,
             _building_full_address(paths).label("full_address"),
+            relevance.label("relevance"),
         )
         .join(paths, paths.c.object_id == Building.address_object_id)
         .where(*filters)
-        .order_by(paths.c.normalized_path, Building.normalized_number)
+        .order_by(
+            relevance.desc(),
+            paths.c.normalized_path,
+            Building.normalized_number,
+            Building.normalized_corpus,
+            Building.normalized_structure,
+            Building.id,
+        )
         .limit(limit)
         .offset(offset)
     )
