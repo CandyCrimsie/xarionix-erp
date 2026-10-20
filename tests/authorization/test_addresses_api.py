@@ -340,6 +340,99 @@ async def test_address_hierarchy_supports_optional_area_and_rejects_invalid_move
 
 
 @pytest.mark.asyncio
+async def test_address_and_building_moves_preserve_dependent_records(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    company_id, token, types = await initialize_address_context(db_session, api_client)
+    headers = company_headers(token, company_id)
+    source_city, source_street = await create_standard_path(
+        api_client,
+        headers,
+        types,
+        city_name="Раменское",
+        street_name="Гагарина",
+    )
+    target_city, target_street = await create_standard_path(
+        api_client,
+        headers,
+        types,
+        city_name="Жуковский",
+        street_name="Центральная",
+    )
+    building_response = await create_building_request(
+        api_client,
+        headers,
+        source_street["id"],
+        number="53",
+    )
+    assert building_response.status_code == 201
+    building = building_response.json()
+    entrance_response = await api_client.post(
+        f"/api/v1/buildings/{building['id']}/entrances",
+        headers=headers,
+        json={"number": "1"},
+    )
+    assert entrance_response.status_code == 201
+    entrance = entrance_response.json()
+    location_response = await api_client.post(
+        "/api/v1/locations",
+        headers=headers,
+        json={
+            "building_id": building["id"],
+            "entrance_id": entrance["id"],
+            "floor": "9",
+            "name": "Технический шкаф",
+        },
+    )
+    assert location_response.status_code == 201
+    location = location_response.json()
+
+    moved_street = await api_client.patch(
+        f"/api/v1/address-objects/{source_street['id']}",
+        headers=headers,
+        json={"parent_id": target_city["id"]},
+    )
+    assert moved_street.status_code == 200, moved_street.text
+    assert moved_street.json()["id"] == source_street["id"]
+    assert moved_street.json()["parent_id"] == target_city["id"]
+    after_street_move = await api_client.get(
+        f"/api/v1/buildings/{building['id']}",
+        headers=headers,
+    )
+    assert after_street_move.status_code == 200
+    assert after_street_move.json()["full_address"] == (
+        "Жуковский, ул. Гагарина, д. 53"
+    )
+
+    moved_building = await api_client.patch(
+        f"/api/v1/buildings/{building['id']}",
+        headers=headers,
+        json={"address_object_id": target_street["id"]},
+    )
+    assert moved_building.status_code == 200, moved_building.text
+    assert moved_building.json()["id"] == building["id"]
+    assert moved_building.json()["address_object_id"] == target_street["id"]
+    assert moved_building.json()["full_address"] == (
+        "Жуковский, ул. Центральная, д. 53"
+    )
+
+    stored_entrance = await db_session.scalar(
+        select(Entrance).where(Entrance.id == entrance["id"])
+    )
+    stored_location = await db_session.scalar(
+        select(Location).where(Location.id == location["id"])
+    )
+    assert stored_entrance is not None
+    assert stored_entrance.building_id == building["id"]
+    assert stored_location is not None
+    assert stored_location.building_id == building["id"]
+    assert stored_location.entrance_id == entrance["id"]
+    assert stored_location.company_id == company_id
+
+
+@pytest.mark.asyncio
 async def test_refined_hierarchy_rejects_locality_nesting_and_preserves_legacy_edits(
     db_session: AsyncSession,
     api_client: AsyncClient,
