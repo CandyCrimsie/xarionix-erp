@@ -6,6 +6,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.permissions.scopes import PermissionScope
+from core.address_normalization import normalize_address_value
+from core.address_types import SYSTEM_ADDRESS_TYPES
+from models.address_objects import AddressObject
+from models.address_types import AddressType, AddressTypeCategory
 from models.buildings import Building
 from models.company_memberships import CompanyMembership
 from models.entrances import Entrance
@@ -156,13 +160,11 @@ async def test_address_type_bootstrap_is_idempotent_and_preserves_custom_types(
     first = list((await db_session.execute(select(Permission))).scalars().all())
     assert first == []
 
-    from models.address_types import AddressType, AddressTypeCategory
-
     custom = AddressType(
-        code="microdistrict",
+        code="custom_area",
         category=AddressTypeCategory.AREA,
-        name="Микрорайон",
-        short_name="мкр.",
+        name="Особая зона",
+        short_name="оз.",
         sort_order=75,
     )
     db_session.add(custom)
@@ -172,8 +174,91 @@ async def test_address_type_bootstrap_is_idempotent_and_preserves_custom_types(
 
     result = await db_session.execute(select(AddressType))
     types = list(result.scalars().all())
-    assert len(types) == 11
-    assert next(item for item in types if item.code == "microdistrict").name == "Микрорайон"
+    assert len(types) == len(SYSTEM_ADDRESS_TYPES) + 1
+    assert next(item for item in types if item.code == "custom_area").name == "Особая зона"
+
+
+@pytest.mark.asyncio
+async def test_address_type_crud_generates_stable_codes_and_protects_system_types(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    company_id, token, types = await initialize_address_context(db_session, api_client)
+    headers = company_headers(token, company_id)
+
+    first = await api_client.post(
+        "/api/v1/address-types",
+        headers=headers,
+        json={
+            "category": "territory",
+            "name": "Гаражный кооператив",
+            "short_name": "тер. ГСК",
+            "sort_order": 76,
+        },
+    )
+    assert first.status_code == 201, first.text
+    assert first.json()["code"] == "custom_territory_garazhnyi_kooperativ"
+    assert first.json()["is_system"] is False
+
+    second = await api_client.post(
+        "/api/v1/address-types",
+        headers=headers,
+        json={
+            "category": "territory",
+            "name": "Гаражный кооператив",
+            "short_name": "тер. ГСК-2",
+            "sort_order": 77,
+        },
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["code"] == "custom_territory_garazhnyi_kooperativ_2"
+
+    updated = await api_client.patch(
+        f"/api/v1/address-types/{first.json()['id']}",
+        headers=headers,
+        json={"name": "Гаражная территория", "sort_order": 75},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["code"] == first.json()["code"]
+
+    system_update = await api_client.patch(
+        f"/api/v1/address-types/{types['city']}",
+        headers=headers,
+        json={"name": "Город изменённый"},
+    )
+    system_delete = await api_client.delete(
+        f"/api/v1/address-types/{types['city']}",
+        headers=headers,
+    )
+    assert system_update.status_code == 409
+    assert system_delete.status_code == 409
+
+    custom_type = first.json()
+    city = await create_object(
+        api_client,
+        headers,
+        type_id=types["city"],
+        name="Жуковский",
+    )
+    await create_object(
+        api_client,
+        headers,
+        type_id=custom_type["id"],
+        name="ГСК Метеор",
+        parent_id=city["id"],
+    )
+    in_use_delete = await api_client.delete(
+        f"/api/v1/address-types/{custom_type['id']}",
+        headers=headers,
+    )
+    assert in_use_delete.status_code == 409
+
+    unused_delete = await api_client.delete(
+        f"/api/v1/address-types/{second.json()['id']}",
+        headers=headers,
+    )
+    assert unused_delete.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -252,6 +337,125 @@ async def test_address_hierarchy_supports_optional_area_and_rejects_invalid_move
     tree = await api_client.get("/api/v1/address-objects/tree", headers=headers)
     assert tree.status_code == 200
     assert tree.json()[0]["children"][0]["children"][0]["name"] == "Дмитрия Ульянова"
+
+
+@pytest.mark.asyncio
+async def test_refined_hierarchy_rejects_locality_nesting_and_preserves_legacy_edits(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    company_id, token, types = await initialize_address_context(db_session, api_client)
+    headers = company_headers(token, company_id)
+    city = await create_object(
+        api_client,
+        headers,
+        type_id=types["city"],
+        name="Москва",
+    )
+
+    nested_city = await api_client.post(
+        "/api/v1/address-objects",
+        headers=headers,
+        json={
+            "parent_id": city["id"],
+            "type_id": types["city"],
+            "name": "Зеленоград",
+        },
+    )
+    nested_settlement = await api_client.post(
+        "/api/v1/address-objects",
+        headers=headers,
+        json={
+            "parent_id": city["id"],
+            "type_id": types["settlement"],
+            "name": "Посёлок внутри города",
+        },
+    )
+    assert nested_city.status_code == 409
+    assert nested_settlement.status_code == 409
+
+    # Historical rows remain readable and can still be renamed. Only a real
+    # hierarchy/type transition is checked against the refined rules.
+    legacy = AddressObject(
+        parent_id=city["id"],
+        type_id=types["settlement"],
+        name="Старое название",
+        normalized_name=normalize_address_value("Старое название"),
+    )
+    db_session.add(legacy)
+    await db_session.commit()
+    rename = await api_client.patch(
+        f"/api/v1/address-objects/{legacy.id}",
+        headers=headers,
+        json={"name": "Новое название", "type_id": types["settlement"]},
+    )
+    assert rename.status_code == 200, rename.text
+    assert rename.json()["name"] == "Новое название"
+
+
+@pytest.mark.asyncio
+async def test_territory_accepts_direct_buildings_and_optional_streets(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    company_id, token, types = await initialize_address_context(db_session, api_client)
+    headers = company_headers(token, company_id)
+    city = await create_object(
+        api_client,
+        headers,
+        type_id=types["city"],
+        name="Жуковский",
+    )
+    territory = await create_object(
+        api_client,
+        headers,
+        type_id=types["snt_territory"],
+        name="Облепиха",
+        parent_id=city["id"],
+    )
+
+    direct_building = await create_building_request(
+        api_client,
+        headers,
+        territory["id"],
+        number="41",
+    )
+    assert direct_building.status_code == 201, direct_building.text
+    assert direct_building.json()["full_address"] == (
+        "Жуковский, тер. СНТ Облепиха, д. 41"
+    )
+
+    street = await create_object(
+        api_client,
+        headers,
+        type_id=types["street"],
+        name="Центральная",
+        parent_id=territory["id"],
+    )
+    street_building = await create_building_request(
+        api_client,
+        headers,
+        street["id"],
+        number="42",
+    )
+    assert street_building.status_code == 201
+
+    district = await create_object(
+        api_client,
+        headers,
+        type_id=types["district"],
+        name="Центральный",
+        parent_id=city["id"],
+    )
+    invalid_area_building = await create_building_request(
+        api_client,
+        headers,
+        district["id"],
+        number="1",
+    )
+    assert invalid_area_building.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -869,6 +1073,17 @@ async def test_address_permissions_enforce_read_and_manage(
         json={"parent_id": None, "type_id": types["city"], "name": "Москва"},
     )
     assert denied.status_code == 403
+    denied_type_management = await api_client.post(
+        "/api/v1/address-types",
+        headers=reader_headers,
+        json={
+            "category": "territory",
+            "name": "Закрытая территория",
+            "short_name": "тер.",
+            "sort_order": 75,
+        },
+    )
+    assert denied_type_management.status_code == 403
 
     user_without_access = await register_user(
         db_session,

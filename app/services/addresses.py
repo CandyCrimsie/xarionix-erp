@@ -261,12 +261,17 @@ async def update_address_object(
     address_type = await get_address_type(session, type_id)
     if address_type is None:
         raise AddressTypeNotFoundError
-    await validate_address_object_hierarchy(
-        session,
-        address_type=address_type,
-        parent_id=parent_id,
-        moving_object_id=address_object_id,
+    hierarchy_changed = (
+        type_id != record.address_object.type_id
+        or parent_id != record.address_object.parent_id
     )
+    if hierarchy_changed:
+        await validate_address_object_hierarchy(
+            session,
+            address_type=address_type,
+            parent_id=parent_id,
+            moving_object_id=address_object_id,
+        )
     for field, value in values.items():
         setattr(record.address_object, field, value)
     if "name" in values:

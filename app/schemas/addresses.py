@@ -19,7 +19,8 @@ from models.address_types import AddressTypeCategory
 
 
 class AddressTypeCreate(BaseModel):
-    code: str = Field(
+    code: str | None = Field(
+        default=None,
         min_length=1,
         max_length=50,
         pattern=r"^[a-z][a-z0-9_]*$",

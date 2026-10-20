@@ -20,6 +20,7 @@ class AddressTypeCategory(StrEnum):
     REGION = "region"
     LOCALITY = "locality"
     AREA = "area"
+    TERRITORY = "territory"
     THOROUGHFARE = "thoroughfare"
 
 
