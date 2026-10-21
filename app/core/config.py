@@ -60,6 +60,22 @@ class Config(BaseSettings):
         le=64,
     )
 
+    MAP_TILES_ENABLED: bool = False
+    MAP_TILES_SIGNING_SECRET: str = Field(
+        default="",
+        max_length=256,
+    )
+    MAP_TILE_SESSION_TTL_SECONDS: int = Field(
+        default=600,
+        ge=60,
+        le=3600,
+    )
+    MAP_MAX_BUILDINGS_PER_VIEWPORT: int = Field(
+        default=2000,
+        ge=100,
+        le=10000,
+    )
+
 
     @model_validator(mode="after")
     def validate_invitation_expiration(
@@ -73,6 +89,23 @@ class Config(BaseSettings):
                 "Default invitation expiration cannot "
                 "exceed maximum invitation expiration"
             )
+
+        if self.MAP_TILES_ENABLED:
+            secret = self.MAP_TILES_SIGNING_SECRET
+            if len(secret) < 32:
+                raise ValueError(
+                    "MAP_TILES_SIGNING_SECRET must contain at least "
+                    "32 characters when map tiles are enabled"
+                )
+
+            if not all(
+                character.isalnum() or character in "_-"
+                for character in secret
+            ):
+                raise ValueError(
+                    "MAP_TILES_SIGNING_SECRET may contain only letters, "
+                    "digits, underscores and hyphens"
+                )
 
         return self
 

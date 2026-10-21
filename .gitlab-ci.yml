@@ -57,3 +57,19 @@ python-tests:
     paths:
       - pytest-report.xml
     expire_in: 1 week
+
+map-proxy-config:
+  stage: test
+  image: nginx:1.29-alpine
+  variables:
+    YANDEX_TILES_API_KEY: "ci-placeholder-key"
+    MAP_TILES_SIGNING_SECRET: "ci-map-signing-secret-0123456789abcdef"
+    MAP_TILES_CACHE_SIZE: "64m"
+    MAP_TILES_CACHE_TTL: "12h"
+    MAP_TILES_CACHE_INACTIVE: "1h"
+    MAP_TILES_RPS: "28"
+  script:
+    - sh infrastructure/map-proxy/validate-map-env.sh
+    - cp infrastructure/map-proxy/nginx.conf /etc/nginx/nginx.conf
+    - envsubst '${YANDEX_TILES_API_KEY} ${MAP_TILES_SIGNING_SECRET} ${MAP_TILES_CACHE_SIZE} ${MAP_TILES_CACHE_TTL} ${MAP_TILES_CACHE_INACTIVE} ${MAP_TILES_RPS}' < infrastructure/map-proxy/default.conf.template > /etc/nginx/conf.d/default.conf
+    - nginx -t

@@ -16,6 +16,7 @@ from .v1 import (
     setup,
     invitations,
     addresses,
+    map,
 )
 
 router = APIRouter()
@@ -35,3 +36,4 @@ router.include_router(membership_permission_overrides.router)
 router.include_router(setup.router)
 router.include_router(invitations.router)
 router.include_router(addresses.router)
+router.include_router(map.router)

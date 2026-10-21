@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 
 from sqlalchemy import (
     Select,
@@ -39,6 +40,15 @@ class AddressObjectRecord:
 class BuildingRecord:
     building: Building
     full_address: str
+
+
+@dataclass(slots=True, frozen=True)
+class AddressObjectBuildingBounds:
+    west: Decimal
+    south: Decimal
+    east: Decimal
+    north: Decimal
+    building_count: int
 
 
 async def list_address_types(
@@ -321,6 +331,80 @@ async def get_building_record(
     if row is None:
         return None
     return BuildingRecord(building=row[0], full_address=row[1])
+
+
+async def list_building_records_in_bounds(
+    session: AsyncSession,
+    *,
+    west: Decimal,
+    south: Decimal,
+    east: Decimal,
+    north: Decimal,
+    limit: int,
+) -> list[BuildingRecord]:
+    """Return at most ``limit`` geocoded buildings in a viewport.
+
+    The caller intentionally asks for one row more than the public limit, so
+    it can reject an over-wide viewport instead of silently returning a
+    partial and therefore misleading map.
+    """
+    result = await session.execute(
+        _building_record_select()
+        .where(
+            Building.latitude.is_not(None),
+            Building.longitude.is_not(None),
+            Building.longitude >= west,
+            Building.longitude <= east,
+            Building.latitude >= south,
+            Building.latitude <= north,
+        )
+        .order_by(Building.id)
+        .limit(limit)
+    )
+    return _building_records(result.all())
+
+
+async def get_address_object_building_bounds(
+    session: AsyncSession,
+    *,
+    address_object_id: int,
+) -> AddressObjectBuildingBounds | None:
+    descendants = (
+        select(AddressObject.id)
+        .where(AddressObject.id == address_object_id)
+        .cte(name="map_address_descendants", recursive=True)
+    )
+    child = AddressObject.__table__.alias("map_address_child")
+    descendants = descendants.union_all(
+        select(child.c.id).where(child.c.parent_id == descendants.c.id)
+    )
+    result = await session.execute(
+        select(
+            func.min(Building.longitude),
+            func.min(Building.latitude),
+            func.max(Building.longitude),
+            func.max(Building.latitude),
+            func.count(Building.id),
+        )
+        .join(
+            descendants,
+            descendants.c.id == Building.address_object_id,
+        )
+        .where(
+            Building.latitude.is_not(None),
+            Building.longitude.is_not(None),
+        )
+    )
+    west, south, east, north, count = result.one()
+    if not count:
+        return None
+    return AddressObjectBuildingBounds(
+        west=west,
+        south=south,
+        east=east,
+        north=north,
+        building_count=count,
+    )
 
 
 async def search_building_records(

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Numeric,
     String,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,6 +38,14 @@ class Building(Base):
             "normalized_corpus",
             "normalized_structure",
             unique=True,
+        ),
+        Index(
+            "ix_buildings_map_coordinates",
+            "longitude",
+            "latitude",
+            postgresql_where=text(
+                "longitude IS NOT NULL AND latitude IS NOT NULL"
+            ),
         ),
     )
 

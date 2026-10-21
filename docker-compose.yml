@@ -107,6 +107,50 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  map-proxy:
+    build:
+      context: infrastructure/map-proxy
+      dockerfile: Dockerfile
+    container_name: xarionix_map_proxy
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:${MAP_PROXY_PORT:-8088}:8080"
+
+    environment:
+      YANDEX_TILES_API_KEY: ${YANDEX_TILES_API_KEY}
+      MAP_TILES_SIGNING_SECRET: ${MAP_TILES_SIGNING_SECRET}
+      MAP_TILES_CACHE_SIZE: ${MAP_TILES_CACHE_SIZE:-2g}
+      MAP_TILES_CACHE_TTL: ${MAP_TILES_CACHE_TTL:-12h}
+      MAP_TILES_CACHE_INACTIVE: ${MAP_TILES_CACHE_INACTIVE:-7d}
+      MAP_TILES_RPS: ${MAP_TILES_RPS:-28}
+
+    volumes:
+      - map_tiles_cache:/var/cache/nginx/map-tiles
+
+    tmpfs:
+      - /var/run
+
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:8080/healthz
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "5"
+
 volumes:
   postgres_data:
   redis_data:
+  map_tiles_cache:

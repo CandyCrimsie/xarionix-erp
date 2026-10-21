@@ -57,3 +57,76 @@ docker compose -f docker-compose.test.yml down
 GitLab CI описан в `.gitlab-ci.yml`: job `python-tests` запускает весь набор
 тестов с отдельными service-контейнерами PostgreSQL и Redis и публикует JUnit
 отчёт в интерфейсе GitLab.
+
+## Карта адресов и Yandex Tiles API
+
+Картографическая интеграция состоит из трёх изолированных частей:
+
+1. FastAPI проверяет JWT, `X-Company-Id` и `addresses.read`, выдаёт
+   краткоживущую подписанную ссылку `/api/v1/map/session` и возвращает GeoJSON
+   зданий только для текущего viewport через `/api/v1/map/buildings`.
+2. Браузер загружает MapLibre динамически при открытии карты. Ключ Yandex API
+   в JavaScript, HTML и ответах FastAPI отсутствует.
+3. Отдельный Nginx-контейнер `map-proxy` проверяет подпись и координаты тайла,
+   читает дисковый cache и только при cache miss обращается к фиксированному
+   origin `tiles.api-maps.yandex.ru`. Общий limiter применяется после cache
+   lookup и по умолчанию ограничивает весь proxy значением 28 RPS.
+
+Для включения карты задайте одинаковый `MAP_TILES_SIGNING_SECRET` длиной не
+менее 32 символов для API и proxy, добавьте `YANDEX_TILES_API_KEY`, установите
+`MAP_TILES_ENABLED=true`, затем запустите инфраструктуру:
+
+```bash
+docker compose up -d --build
+```
+
+Без ключа proxy завершается с явной ошибкой конфигурации, а endpoint сессии
+карты возвращает понятный HTTP 503. Если карта временно не нужна, остальные
+сервисы можно запустить отдельно:
+
+```bash
+docker compose up -d --build api postgres redis
+```
+
+Порт proxy по умолчанию доступен только на
+`127.0.0.1:8088`; Angular dev-server пересылает туда `/map/**`.
+
+Настройки cache по умолчанию: 2 ГБ, TTL 12 часов, `inactive=7d`. Cache хранится
+в named volume `map_tiles_cache`. В access log proxy записывается только path:
+API key, подпись и query string не журналируются. Смените signing secret, чтобы
+немедленно инвалидировать все ранее выданные browser permissions.
+
+Новые установки получают частичный индекс
+`ix_buildings_map_coordinates (longitude, latitude)` автоматически при
+создании таблиц. Поскольку Alembic до стабильного релиза не используется, для
+существующей development database создайте индекс вручную без долгой блокировки
+записи:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_buildings_map_coordinates
+ON buildings (longitude, latitude)
+WHERE longitude IS NOT NULL AND latitude IS NOT NULL;
+```
+
+Сравнить план bbox-запроса на 550 000 строк до и после индекса можно командой:
+
+```bash
+docker exec -i xarionix_postgres_test \
+  psql -U xarionix_test -d xarionix_test \
+  < tests/performance/map_buildings_explain.sql
+```
+
+Проверка proxy использует локальный HTTPS mock origin, проверяет подпись,
+валидацию `z/x/y`, cache HIT, cache lock, отсутствие секретов в логах и 250
+параллельных cache misses:
+
+```bash
+infrastructure/map-proxy/tests/run-proxy-tests.sh
+```
+
+Перед production-включением нужно подтвердить подходящий тариф и лицензионные
+условия Yandex Maps для закрытой ERP. Текущие общие бесплатные условия требуют
+открытого бесплатного доступа к приложению; 12-часовой cache технически
+является временным, но его допустимость и коммерческое использование должны
+быть подтверждены условиями вашего тарифа. В UI нельзя скрывать или перекрывать
+логотип Яндекса, ссылку «Открыть в Картах» и ссылку на условия использования.
