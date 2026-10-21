@@ -14,6 +14,33 @@ engine = create_async_engine(
 )
 
 
+async def _extend_development_schema(connection) -> None:
+    """Apply additive compatibility changes until formal migrations are enabled."""
+    await connection.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM pg_type
+                    WHERE typname = 'address_type_category'
+                ) AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_type AS type
+                    JOIN pg_enum AS value ON value.enumtypid = type.oid
+                    WHERE type.typname = 'address_type_category'
+                      AND value.enumlabel = 'territory'
+                ) THEN
+                    ALTER TYPE address_type_category ADD VALUE 'territory';
+                END IF;
+            END
+            $$;
+            """
+        )
+    )
+
+
 async def initialize_database() -> None:
     import models
 
@@ -22,6 +49,7 @@ async def initialize_database() -> None:
         await connection.execute(
             text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
         )
+        await _extend_development_schema(connection)
         await connection.run_sync(Base.metadata.create_all)
 
 

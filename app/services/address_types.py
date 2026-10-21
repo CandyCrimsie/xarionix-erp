@@ -1,3 +1,5 @@
+import re
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +31,42 @@ class SystemAddressTypeProtectedError(Exception):
 
 class AddressTypeInUseError(Exception):
     pass
+
+
+_CYRILLIC_TRANSLITERATION = str.maketrans({
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d",
+    "е": "e", "ё": "e", "ж": "zh", "з": "z", "и": "i",
+    "й": "i", "к": "k", "л": "l", "м": "m", "н": "n",
+    "о": "o", "п": "p", "р": "r", "с": "s", "т": "t",
+    "у": "u", "ф": "f", "х": "h", "ц": "ts", "ч": "ch",
+    "ш": "sh", "щ": "sch", "ъ": "", "ы": "y", "ь": "",
+    "э": "e", "ю": "yu", "я": "ya",
+})
+
+
+def address_type_code_base(name: str, category: str) -> str:
+    transliterated = name.casefold().translate(_CYRILLIC_TRANSLITERATION)
+    slug = re.sub(r"[^a-z0-9]+", "_", transliterated).strip("_")
+    if not slug:
+        slug = category
+    prefix = f"custom_{category}_"
+    return f"{prefix}{slug}"[:50].rstrip("_")
+
+
+async def _next_generated_code(
+    session: AsyncSession,
+    *,
+    name: str,
+    category: str,
+) -> str:
+    base = address_type_code_base(name, category)
+    candidate = base
+    suffix = 2
+    while await get_address_type_by_code(session, candidate) is not None:
+        suffix_text = f"_{suffix}"
+        candidate = f"{base[:50 - len(suffix_text)]}{suffix_text}"
+        suffix += 1
+    return candidate
 
 
 async def sync_system_address_types(
@@ -66,22 +104,32 @@ async def create_address_type(
     session: AsyncSession,
     data: AddressTypeCreate,
 ) -> AddressType:
-    address_type = AddressType(
-        code=data.code,
-        category=data.category,
-        name=data.name,
-        short_name=data.short_name,
-        sort_order=data.sort_order,
-        is_system=False,
-    )
-    session.add(address_type)
-    try:
-        await session.commit()
-        await session.refresh(address_type)
-        return address_type
-    except IntegrityError as exc:
-        await session.rollback()
-        raise AddressTypeDuplicateError from exc
+    generated_code = data.code is None
+    for _attempt in range(100):
+        code = data.code or await _next_generated_code(
+            session,
+            name=data.name,
+            category=data.category.value,
+        )
+        address_type = AddressType(
+            code=code,
+            category=data.category,
+            name=data.name,
+            short_name=data.short_name,
+            sort_order=data.sort_order,
+            is_system=False,
+        )
+        session.add(address_type)
+        try:
+            await session.commit()
+            await session.refresh(address_type)
+            return address_type
+        except IntegrityError as exc:
+            await session.rollback()
+            if not generated_code:
+                raise AddressTypeDuplicateError from exc
+
+    raise AddressTypeDuplicateError
 
 
 async def update_address_type(
