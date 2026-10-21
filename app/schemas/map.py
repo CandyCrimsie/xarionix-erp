@@ -11,6 +11,9 @@ class MapTileSessionResponse(BaseModel):
     min_zoom: int = 0
     max_zoom: int = 20
     tile_size: int = 256
+    default_latitude: float
+    default_longitude: float
+    default_zoom: float
 
 
 class MapBuildingProperties(BaseModel):

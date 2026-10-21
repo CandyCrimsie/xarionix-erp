@@ -75,6 +75,21 @@ class Config(BaseSettings):
         ge=100,
         le=10000,
     )
+    MAP_DEFAULT_LATITUDE: float = Field(
+        default=55.7558,
+        ge=-90,
+        le=90,
+    )
+    MAP_DEFAULT_LONGITUDE: float = Field(
+        default=37.6176,
+        ge=-180,
+        le=180,
+    )
+    MAP_DEFAULT_ZOOM: float = Field(
+        default=10,
+        ge=0,
+        le=20,
+    )
 
 
     @model_validator(mode="after")
@@ -92,19 +107,25 @@ class Config(BaseSettings):
 
         if self.MAP_TILES_ENABLED:
             secret = self.MAP_TILES_SIGNING_SECRET
-            if len(secret) < 32:
+            if len(secret) < 24:
                 raise ValueError(
                     "MAP_TILES_SIGNING_SECRET must contain at least "
-                    "32 characters when map tiles are enabled"
+                    "24 characters when map tiles are enabled"
                 )
 
-            if not all(
-                character.isalnum() or character in "_-"
-                for character in secret
+            unpadded_secret = secret.rstrip("=")
+            padding = secret[len(unpadded_secret):]
+            if (
+                not unpadded_secret
+                or len(padding) > 2
+                or not all(
+                    character.isalnum() or character in "_-"
+                    for character in unpadded_secret
+                )
             ):
                 raise ValueError(
-                    "MAP_TILES_SIGNING_SECRET may contain only letters, "
-                    "digits, underscores and hyphens"
+                    "MAP_TILES_SIGNING_SECRET must be URL-safe Base64 "
+                    "with no more than two trailing equals signs"
                 )
 
         return self

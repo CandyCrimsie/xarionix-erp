@@ -152,6 +152,27 @@ async def create_building_request(
     )
 
 
+def search_item_id(item: dict) -> tuple[str, int]:
+    entity = item["object"] if item["kind"] == "address_object" else item["building"]
+    return item["kind"], entity["id"]
+
+
+def search_buildings(payload: dict) -> list[dict]:
+    return [
+        item["building"]
+        for item in payload["items"]
+        if item["kind"] == "building"
+    ]
+
+
+def search_address_objects(payload: dict) -> list[dict]:
+    return [
+        item["object"]
+        for item in payload["items"]
+        if item["kind"] == "address_object"
+    ]
+
+
 @pytest.mark.asyncio
 async def test_address_type_bootstrap_is_idempotent_and_preserves_custom_types(
     db_session: AsyncSession,
@@ -624,7 +645,9 @@ async def test_building_uniqueness_coordinates_and_full_address_search(
         params={"q": "Москва Ленина 15 корпус 2"},
     )
     assert narrowed.status_code == 200
-    assert [item["id"] for item in narrowed.json()["items"]] == [corpus.json()["id"]]
+    assert [item["id"] for item in search_buildings(narrowed.json())] == [
+        corpus.json()["id"]
+    ]
 
 
 @pytest.mark.asyncio
@@ -717,50 +740,53 @@ async def test_smart_address_search_uses_postgresql_matching_and_ranking(
         "Гагарина,    53 Раменское",
     ):
         result = await search(query)
-        assert [item["id"] for item in result["items"][:2]] == [
+        assert [item["id"] for item in search_buildings(result)[:2]] == [
             ram_53["id"],
             ram_53_corpus["id"],
-        ]
-        assert all(item["number"] == "53" for item in result["items"])
+        ], (query, result)
+        assert all(item["number"] == "53" for item in search_buildings(result))
 
     for query in ("рам гагар 53 корп 2", "рам гагар 53 к2"):
         result = await search(query)
-        assert [item["id"] for item in result["items"]] == [
+        assert [item["id"] for item in search_buildings(result)] == [
             ram_53_corpus["id"]
         ]
 
     structure_result = await search(
         "раменское гагарина 53 строение 2"
     )
-    assert [item["id"] for item in structure_result["items"]] == [
+    assert [item["id"] for item in search_buildings(structure_result)] == [
         ram_53_structure["id"]
     ]
 
     street_result = await search("рам гагар")
-    assert street_result["total"] == 5
-    assert {item["id"] for item in street_result["items"]} >= {
+    assert street_result["total"] == 6
+    assert {item["id"] for item in search_buildings(street_result)} >= {
         ram_51["id"],
         ram_53["id"],
     }
+    assert [item["id"] for item in search_address_objects(street_result)] == [
+        ramenskoe_gagarina["id"]
+    ]
 
     cross_city = await search("гагарина 53")
     assert {ram_53["id"], moscow_53["id"]}.issubset(
-        {item["id"] for item in cross_city["items"]}
+        {item["id"] for item in search_buildings(cross_city)}
     )
-    assert all(item["number"] == "53" for item in cross_city["items"])
+    assert all(item["number"] == "53" for item in search_buildings(cross_city))
 
     fuzzy = await search("раменское гагарена 53")
-    assert fuzzy["items"][0]["id"] == ram_53["id"]
+    assert search_buildings(fuzzy)[0]["id"] == ram_53["id"]
 
     exact_before_fuzzy = await search("гагарина 53")
-    exact_ids = [item["id"] for item in exact_before_fuzzy["items"]]
+    exact_ids = [item["id"] for item in search_buildings(exact_before_fuzzy)]
     assert exact_ids.index(ram_53["id"]) < exact_ids.index(typo_53["id"])
 
     lenina = await search("мос лен 15")
-    assert [item["id"] for item in lenina["items"]] == [moscow_15["id"]]
+    assert [item["id"] for item in search_buildings(lenina)] == [moscow_15["id"]]
 
     yo_result = await search("орел елоч 1")
-    assert [item["id"] for item in yo_result["items"]] == [orel_1["id"]]
+    assert [item["id"] for item in search_buildings(yo_result)] == [orel_1["id"]]
 
     first_page = await search("гагар 53", limit=2)
     second_page = await search("гагар 53", limit=2, offset=2)
@@ -771,16 +797,17 @@ async def test_smart_address_search_uses_postgresql_matching_and_ranking(
     assert second_page["offset"] == 2
     assert first_page["items"] == repeated_first_page["items"]
     assert not (
-        {item["id"] for item in first_page["items"]}
-        & {item["id"] for item in second_page["items"]}
+        {search_item_id(item) for item in first_page["items"]}
+        & {search_item_id(item) for item in second_page["items"]}
     )
 
     injection = await search("'; DROP TABLE buildings; --")
     assert injection["items"] == []
     still_available = await search("мос лен 15")
-    assert still_available["items"][0]["id"] == moscow_15["id"]
-    assert "company_id" not in still_available["items"][0]
-    assert "locations" not in still_available["items"][0]
+    building = search_buildings(still_available)[0]
+    assert building["id"] == moscow_15["id"]
+    assert "company_id" not in building
+    assert "locations" not in building
 
     too_many_tokens = await api_client.get(
         "/api/v1/addresses/search",
@@ -788,6 +815,121 @@ async def test_smart_address_search_uses_postgresql_matching_and_ranking(
         params={"q": " ".join(f"слово{index}" for index in range(13))},
     )
     assert too_many_tokens.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_search_returns_address_objects_without_buildings_and_numeric_names(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    company_id, token, types = await initialize_address_context(
+        db_session, api_client
+    )
+    headers = company_headers(token, company_id)
+    country = await create_object(
+        api_client, headers, type_id=types["country"], name="Россия"
+    )
+    region = await create_object(
+        api_client,
+        headers,
+        type_id=types["region"],
+        name="Московская область",
+        parent_id=country["id"],
+    )
+    city = await create_object(
+        api_client,
+        headers,
+        type_id=types["city"],
+        name="Раменское",
+        parent_id=region["id"],
+    )
+    street = await create_object(
+        api_client,
+        headers,
+        type_id=types["street"],
+        name="Гагарина",
+        parent_id=city["id"],
+    )
+    snt = await create_object(
+        api_client,
+        headers,
+        type_id=types["snt_territory"],
+        name="Облепиха",
+        parent_id=city["id"],
+    )
+    march_street = await create_object(
+        api_client,
+        headers,
+        type_id=types["street"],
+        name="8 Марта",
+        parent_id=city["id"],
+    )
+    year_street = await create_object(
+        api_client,
+        headers,
+        type_id=types["street"],
+        name="1905 года",
+        parent_id=city["id"],
+    )
+    microdistrict = await create_object(
+        api_client,
+        headers,
+        type_id=types["microdistrict"],
+        name="1",
+        parent_id=city["id"],
+    )
+
+    async def search(query: str, *, limit: int = 20, offset: int = 0) -> dict:
+        response = await api_client.get(
+            "/api/v1/addresses/search",
+            headers=headers,
+            params={"q": query, "limit": limit, "offset": offset},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    cases = (
+        ("Россия", country["id"]),
+        ("Московская область", region["id"]),
+        ("г. Раменское", city["id"]),
+        ("Гагарина", street["id"]),
+        ("ул Гагарина", street["id"]),
+        ("Раменское Гагарина", street["id"]),
+        ("рам гагар", street["id"]),
+        ("Гагарена", street["id"]),
+        ("СНТ Облепиха", snt["id"]),
+        ("ул. 8 Марта", march_street["id"]),
+        ("ул. 1905 года", year_street["id"]),
+        ("мкр. 1", microdistrict["id"]),
+    )
+    for query, expected_id in cases:
+        payload = await search(query)
+        object_ids = [item["id"] for item in search_address_objects(payload)]
+        assert expected_id in object_ids, (query, payload)
+
+    # A building-looking query must still prefer the exact building and must
+    # not degrade into a partial match of the city or street.
+    building_response = await create_building_request(
+        api_client, headers, street["id"], number="53"
+    )
+    assert building_response.status_code == 201
+    building = building_response.json()
+    building_search = await search("рам гагар 53")
+    assert [item["id"] for item in search_buildings(building_search)] == [
+        building["id"]
+    ]
+    assert search_address_objects(building_search) == []
+
+    # Pagination is shared by both entity kinds and has a stable composite key.
+    first = await search("гагар", limit=1)
+    second = await search("гагар", limit=1, offset=1)
+    repeated = await search("гагар", limit=1)
+    assert first["total"] == 2
+    assert first["items"] == repeated["items"]
+    assert {search_item_id(item) for item in first["items"]}.isdisjoint(
+        {search_item_id(item) for item in second["items"]}
+    )
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,7 @@ MOCK_CONTAINER="xarionix-map-origin-test-$TEST_SUFFIX"
 PROXY_CONTAINER="xarionix-map-proxy-test-$TEST_SUFFIX"
 PROXY_IMAGE="xarionix-map-proxy-test:$TEST_SUFFIX"
 PROXY_PORT="${MAP_PROXY_TEST_PORT:-18088}"
-SIGNING_SECRET="test-map-signing-secret-0123456789abcdef"
+SIGNING_SECRET="dGVzdC1tYXAtc2VjcmV0IQ=="
 TEST_API_KEY="test-yandex-api-key"
 RESULT_DIR=$(mktemp -d)
 

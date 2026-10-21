@@ -11,6 +11,7 @@ from sqlalchemy import (
     literal,
     or_,
     select,
+    union_all,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +41,14 @@ class AddressObjectRecord:
 class BuildingRecord:
     building: Building
     full_address: str
+
+
+@dataclass(slots=True, frozen=True)
+class AddressSearchRecord:
+    kind: str
+    full_address: str
+    address_object: AddressObjectRecord | None = None
+    building: BuildingRecord | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -407,13 +416,38 @@ async def get_address_object_building_bounds(
     )
 
 
-async def search_building_records(
+def _search_token_match(searchable_names, searchable_leaf_name, token: str):
+    escaped_token = re.escape(token)
+    exact_word = searchable_names.regexp_match(rf"(^| ){escaped_token}($| )")
+    exact_leaf = searchable_leaf_name == token
+    word_prefix = searchable_names.regexp_match(rf"(^| ){escaped_token}")
+    leaf_prefix = searchable_leaf_name.startswith(token)
+    substring = searchable_names.contains(token)
+    similarity = func.word_similarity(token, searchable_names)
+    fuzzy = (
+        similarity >= FUZZY_SIMILARITY_THRESHOLD
+        if len(token) >= FUZZY_MIN_TOKEN_LENGTH and token.isalpha()
+        else literal(False)
+    )
+    score = case(
+        (exact_leaf, 50.0),
+        (exact_word, 40.0),
+        (leaf_prefix, 30.0),
+        (word_prefix, 24.0),
+        (substring, 10.0),
+        (fuzzy, similarity * 8.0),
+        else_=0.0,
+    )
+    return or_(substring, fuzzy), score
+
+
+async def search_address_records(
     session: AsyncSession,
     *,
     query: AddressSearchQuery,
     limit: int,
     offset: int,
-) -> tuple[list[BuildingRecord], int]:
+) -> tuple[list[AddressSearchRecord], int]:
     paths = _address_paths_cte()
     searchable_names = func.replace(paths.c.normalized_path, "ё", "е")
     searchable_leaf_name = func.replace(
@@ -421,82 +455,149 @@ async def search_building_records(
         "ё",
         "е",
     )
-    filters = []
-    relevance = literal(0.0)
-
+    name_filters = []
+    name_relevance = literal(0.0)
     for token in query.name_tokens:
-        escaped_token = re.escape(token)
-        exact_word = searchable_names.regexp_match(
-            rf"(^| ){escaped_token}($| )"
+        token_filter, token_score = _search_token_match(
+            searchable_names,
+            searchable_leaf_name,
+            token,
         )
-        exact_leaf = searchable_leaf_name == token
-        word_prefix = searchable_names.regexp_match(
-            rf"(^| ){escaped_token}"
-        )
-        leaf_prefix = searchable_leaf_name.startswith(token)
-        substring = searchable_names.contains(token)
-        similarity = func.word_similarity(token, searchable_names)
-        fuzzy = (
-            similarity >= FUZZY_SIMILARITY_THRESHOLD
-            if len(token) >= FUZZY_MIN_TOKEN_LENGTH and token.isalpha()
-            else literal(False)
-        )
-        filters.append(or_(substring, fuzzy))
-        relevance += case(
-            (exact_leaf, 50.0),
-            (exact_word, 40.0),
-            (leaf_prefix, 30.0),
-            (word_prefix, 24.0),
-            (substring, 10.0),
-            (fuzzy, similarity * 8.0),
+        name_filters.append(token_filter)
+        name_relevance += token_score
+
+    candidates = []
+    has_building_parts = any(
+        (query.house_number, query.corpus, query.structure)
+    )
+    if query.name_tokens and not has_building_parts:
+        complete_leaf_query = " ".join(query.name_tokens)
+        object_relevance = name_relevance + case(
+            (searchable_leaf_name == complete_leaf_query, 120.0),
+            (searchable_leaf_name.startswith(complete_leaf_query), 60.0),
             else_=0.0,
         )
+        candidates.append(
+            select(
+                literal("address_object").label("kind"),
+                paths.c.object_id.label("entity_id"),
+                paths.c.display_path.label("full_address"),
+                paths.c.normalized_path.label("sort_path"),
+                object_relevance.label("relevance"),
+                literal(0).label("kind_order"),
+            ).where(*name_filters)
+        )
 
+    building_filters = list(name_filters)
+    building_relevance = name_relevance
     if query.house_number is not None:
-        filters.append(Building.normalized_number == query.house_number)
-        relevance += 120.0
+        building_filters.append(Building.normalized_number == query.house_number)
+        building_relevance += 120.0
     if query.corpus is not None:
-        filters.append(Building.normalized_corpus == query.corpus)
-        relevance += 50.0
+        building_filters.append(Building.normalized_corpus == query.corpus)
+        building_relevance += 50.0
     else:
-        relevance += case((Building.normalized_corpus == "", 2.0), else_=0.0)
+        building_relevance += case(
+            (Building.normalized_corpus == "", 2.0), else_=0.0
+        )
     if query.structure is not None:
-        filters.append(Building.normalized_structure == query.structure)
-        relevance += 45.0
+        building_filters.append(Building.normalized_structure == query.structure)
+        building_relevance += 45.0
     else:
-        relevance += case((Building.normalized_structure == "", 4.0), else_=0.0)
+        building_relevance += case(
+            (Building.normalized_structure == "", 4.0), else_=0.0
+        )
 
-    if not filters:
+    if building_filters:
+        candidates.append(
+            select(
+                literal("building").label("kind"),
+                Building.id.label("entity_id"),
+                _building_full_address(paths).label("full_address"),
+                func.concat(
+                    paths.c.normalized_path,
+                    " ",
+                    Building.normalized_number,
+                    " ",
+                    Building.normalized_corpus,
+                    " ",
+                    Building.normalized_structure,
+                ).label("sort_path"),
+                building_relevance.label("relevance"),
+                literal(1).label("kind_order"),
+            )
+            .join(paths, paths.c.object_id == Building.address_object_id)
+            .where(*building_filters)
+        )
+    if not candidates:
         return [], 0
 
-    base = (
-        select(Building.id)
-        .join(paths, paths.c.object_id == Building.address_object_id)
-        .where(*filters)
+    combined = (
+        union_all(*candidates).cte("address_search_candidates")
+        if len(candidates) > 1
+        else candidates[0].cte("address_search_candidates")
     )
     total_result = await session.execute(
-        select(func.count()).select_from(base.subquery())
+        select(func.count()).select_from(combined)
     )
-    result = await session.execute(
+    page_result = await session.execute(
         select(
-            Building,
-            _building_full_address(paths).label("full_address"),
-            relevance.label("relevance"),
+            combined.c.kind,
+            combined.c.entity_id,
+            combined.c.full_address,
         )
-        .join(paths, paths.c.object_id == Building.address_object_id)
-        .where(*filters)
         .order_by(
-            relevance.desc(),
-            paths.c.normalized_path,
-            Building.normalized_number,
-            Building.normalized_corpus,
-            Building.normalized_structure,
-            Building.id,
+            combined.c.relevance.desc(),
+            combined.c.kind_order,
+            combined.c.sort_path,
+            combined.c.entity_id,
         )
         .limit(limit)
         .offset(offset)
     )
-    return _building_records(result.all()), total_result.scalar_one()
+    page = page_result.all()
+    object_ids = [row.entity_id for row in page if row.kind == "address_object"]
+    building_ids = [row.entity_id for row in page if row.kind == "building"]
+
+    object_records: dict[int, AddressObjectRecord] = {}
+    if object_ids:
+        object_result = await session.execute(
+            select(AddressObject, AddressType)
+            .join(AddressType, AddressType.id == AddressObject.type_id)
+            .where(AddressObject.id.in_(object_ids))
+        )
+        object_records = {
+            address_object.id: AddressObjectRecord(address_object, address_type)
+            for address_object, address_type in object_result.all()
+        }
+    buildings: dict[int, Building] = {}
+    if building_ids:
+        building_result = await session.execute(
+            select(Building).where(Building.id.in_(building_ids))
+        )
+        buildings = {
+            building.id: building for building in building_result.scalars()
+        }
+
+    records: list[AddressSearchRecord] = []
+    for row in page:
+        if row.kind == "address_object":
+            object_record = object_records.get(row.entity_id)
+            if object_record is not None:
+                records.append(AddressSearchRecord(
+                    kind=row.kind,
+                    full_address=row.full_address,
+                    address_object=object_record,
+                ))
+        else:
+            building = buildings.get(row.entity_id)
+            if building is not None:
+                records.append(AddressSearchRecord(
+                    kind=row.kind,
+                    full_address=row.full_address,
+                    building=BuildingRecord(building, row.full_address),
+                ))
+    return records, total_result.scalar_one()
 
 
 async def get_building(

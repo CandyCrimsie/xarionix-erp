@@ -20,6 +20,11 @@ ADDRESS_SEARCH_ABBREVIATIONS: dict[str, str] = {
     "проспект": "проспект",
     "пер": "переулок",
     "переулок": "переулок",
+    "обл": "область",
+    "область": "область",
+    "мкр": "микрорайон",
+    "микрорайон": "микрорайон",
+    "снт": "снт",
     "д": "дом",
     "дом": "дом",
     "корп": "корпус",
@@ -29,10 +34,21 @@ ADDRESS_SEARCH_ABBREVIATIONS: dict[str, str] = {
 }
 
 
-_ADDRESS_TYPE_WORDS = frozenset(
-    {"город", "улица", "проспект", "переулок"}
-)
+_ADDRESS_TYPE_WORDS = frozenset({
+    "город",
+    "улица",
+    "проспект",
+    "переулок",
+    "область",
+    "микрорайон",
+    "снт",
+})
 _STRUCTURE_WORDS = frozenset({"дом", "корпус", "строение"})
+_NUMERIC_NAME_FOLLOWERS = frozenset({
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+    "года", "лет",
+})
 _TOKEN_RE = re.compile(r"[0-9a-zа-я]+(?:[-/][0-9a-zа-я]+)*")
 _HOUSE_NUMBER_RE = re.compile(
     r"^\d+[a-zа-я]?(?:[-/]\d+[a-zа-я]?)?$"
@@ -78,7 +94,7 @@ def parse_address_search_query(value: str) -> AddressSearchQuery:
     structure: str | None = None
     pending_part: str | None = None
 
-    for token in tokens:
+    for index, token in enumerate(tokens):
         if token in _ADDRESS_TYPE_WORDS:
             continue
         if token in _STRUCTURE_WORDS:
@@ -107,7 +123,16 @@ def parse_address_search_query(value: str) -> AddressSearchQuery:
             continue
 
         if house_number is None and _HOUSE_NUMBER_RE.fullmatch(token):
-            house_number = token
+            previous = tokens[index - 1] if index > 0 else None
+            next_token = tokens[index + 1] if index + 1 < len(tokens) else None
+            followed_by_name = next_token in _NUMERIC_NAME_FOLLOWERS
+            # Digits are valid parts of geographic names (``8 Марта``,
+            # ``1905 года`` and ``мкр. 1``). Explicit ``дом`` is already
+            # handled above; an otherwise trailing number remains a house.
+            if previous in _ADDRESS_TYPE_WORDS or followed_by_name:
+                names.append(token)
+            else:
+                house_number = token
             continue
 
         names.append(token)

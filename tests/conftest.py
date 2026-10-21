@@ -133,9 +133,7 @@ os.environ[
     "SYSTEM_ADMIN_PASSWORD"
 ] = "password123"
 os.environ["MAP_TILES_ENABLED"] = "true"
-os.environ["MAP_TILES_SIGNING_SECRET"] = (
-    "test-map-signing-secret-0123456789abcdef"
-)
+os.environ["MAP_TILES_SIGNING_SECRET"] = "dGVzdC1tYXAtc2VjcmV0IQ=="
 os.environ["MAP_TILE_SESSION_TTL_SECONDS"] = "600"
 os.environ["MAP_MAX_BUILDINGS_PER_VIEWPORT"] = "2000"
 

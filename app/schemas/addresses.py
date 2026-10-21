@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -315,8 +316,26 @@ class LocationResponse(BaseModel):
     updated_at: datetime
 
 
+class AddressObjectSearchItem(BaseModel):
+    kind: Literal["address_object"] = "address_object"
+    object: AddressObjectResponse
+    full_address: str
+
+
+class BuildingSearchItem(BaseModel):
+    kind: Literal["building"] = "building"
+    building: BuildingResponse
+    full_address: str
+
+
+AddressSearchItem = Annotated[
+    AddressObjectSearchItem | BuildingSearchItem,
+    Field(discriminator="kind"),
+]
+
+
 class AddressSearchResponse(BaseModel):
-    items: list[BuildingResponse]
+    items: list[AddressSearchItem]
     total: int
     limit: int
     offset: int

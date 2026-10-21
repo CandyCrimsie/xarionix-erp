@@ -166,4 +166,49 @@ ORDER BY
     building.id
 LIMIT 20;
 
+\echo 'MIXED object/building search with one total and stable pagination'
+EXPLAIN (ANALYZE, BUFFERS)
+WITH RECURSIVE address_paths AS (
+    SELECT
+        id AS object_id,
+        normalized_name AS normalized_path,
+        normalized_name AS normalized_leaf_name
+    FROM bench_address_objects
+    WHERE parent_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        child.id,
+        parent.normalized_path || ' ' || child.normalized_name,
+        child.normalized_name
+    FROM bench_address_objects AS child
+    JOIN address_paths AS parent ON child.parent_id = parent.object_id
+), candidates AS (
+    SELECT
+        'address_object'::text AS kind,
+        path.object_id AS entity_id,
+        0 AS kind_order,
+        path.normalized_path AS sort_path
+    FROM address_paths AS path
+    WHERE path.normalized_path LIKE '%рам%'
+      AND path.normalized_path LIKE '%гагар%'
+
+    UNION ALL
+
+    SELECT
+        'building'::text,
+        building.id,
+        1,
+        path.normalized_path || ' ' || building.normalized_number
+    FROM bench_buildings AS building
+    JOIN address_paths AS path ON path.object_id = building.address_object_id
+    WHERE path.normalized_path LIKE '%рам%'
+      AND path.normalized_path LIKE '%гагар%'
+)
+SELECT kind, entity_id, count(*) OVER () AS total
+FROM candidates
+ORDER BY kind_order, sort_path, entity_id
+LIMIT 20 OFFSET 0;
+
 ROLLBACK;

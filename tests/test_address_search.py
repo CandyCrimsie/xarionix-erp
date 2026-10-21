@@ -39,6 +39,25 @@ def test_parse_address_search_query_keeps_building_parts_separate():
     assert structured.structure == "4"
 
 
+@pytest.mark.parametrize(
+    ("query", "expected_names"),
+    [
+        ("ул. 8 Марта", ("8", "марта")),
+        ("ул. 1905 года", ("1905", "года")),
+        ("1-я улица", ("1-я",)),
+        ("мкр. 1", ("1",)),
+    ],
+)
+def test_parse_address_search_query_preserves_numbers_in_object_names(
+    query: str,
+    expected_names: tuple[str, ...],
+):
+    parsed = parse_address_search_query(query)
+
+    assert parsed.name_tokens == expected_names
+    assert parsed.house_number is None
+
+
 def test_parse_address_search_query_limits_token_count():
     with pytest.raises(AddressSearchQueryTooComplexError):
         parse_address_search_query(" ".join(f"token{index}" for index in range(13)))

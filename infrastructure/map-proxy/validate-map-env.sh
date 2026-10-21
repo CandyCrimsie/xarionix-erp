@@ -24,16 +24,15 @@ case "$YANDEX_TILES_API_KEY" in
         ;;
 esac
 
-if [ "${#MAP_TILES_SIGNING_SECRET}" -lt 32 ]; then
-    echo "map-proxy: MAP_TILES_SIGNING_SECRET must contain at least 32 characters" >&2
+if [ "${#MAP_TILES_SIGNING_SECRET}" -lt 24 ]; then
+    echo "map-proxy: MAP_TILES_SIGNING_SECRET must contain at least 24 characters" >&2
     exit 1
 fi
-case "$MAP_TILES_SIGNING_SECRET" in
-    *[!A-Za-z0-9_-]*)
-        echo "map-proxy: MAP_TILES_SIGNING_SECRET contains unsafe characters" >&2
-        exit 1
-        ;;
-esac
+if ! printf '%s' "$MAP_TILES_SIGNING_SECRET" \
+    | grep -Eq '^[A-Za-z0-9_-]+={0,2}$'; then
+    echo "map-proxy: MAP_TILES_SIGNING_SECRET must be URL-safe Base64" >&2
+    exit 1
+fi
 
 if ! printf '%s' "$MAP_TILES_CACHE_SIZE" \
     | grep -Eq '^[1-9][0-9]*[kKmMgG]$'; then

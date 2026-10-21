@@ -17,6 +17,7 @@ from models import (
     role_delegations,
     membership_permission_overrides,
     company_invitations,
+    map_markers,
 )
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "role_delegations",
     "membership_permission_overrides",
     "company_invitations",
+    "map_markers",
 ]

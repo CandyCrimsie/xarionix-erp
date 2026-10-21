@@ -25,16 +25,18 @@ from repositories.addresses import (
     list_entrances,
     list_locations,
     location_has_equipment,
-    search_building_records,
+    search_address_records,
 )
 from schemas.addresses import (
     AddressObjectCreate,
     AddressObjectResponse,
+    AddressObjectSearchItem,
     AddressObjectTreeResponse,
     AddressObjectUpdate,
     AddressSearchResponse,
     BuildingCreate,
     BuildingResponse,
+    BuildingSearchItem,
     BuildingUpdate,
     EntranceCreate,
     EntranceUpdate,
@@ -598,14 +600,26 @@ async def search_addresses(
         return AddressSearchResponse(
             items=[], total=0, limit=limit, offset=offset
         )
-    records, total = await search_building_records(
+    records, total = await search_address_records(
         session,
         query=parsed_query,
         limit=limit,
         offset=offset,
     )
     return AddressSearchResponse(
-        items=[building_response(record) for record in records],
+        items=[
+            AddressObjectSearchItem(
+                object=address_object_response(record.address_object),
+                full_address=record.full_address,
+            )
+            if record.kind == "address_object" and record.address_object
+            else BuildingSearchItem(
+                building=building_response(record.building),
+                full_address=record.full_address,
+            )
+            for record in records
+            if record.address_object is not None or record.building is not None
+        ],
         total=total,
         limit=limit,
         offset=offset,

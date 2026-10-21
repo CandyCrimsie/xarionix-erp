@@ -63,7 +63,7 @@ map-proxy-config:
   image: nginx:1.29-alpine
   variables:
     YANDEX_TILES_API_KEY: "ci-placeholder-key"
-    MAP_TILES_SIGNING_SECRET: "ci-map-signing-secret-0123456789abcdef"
+    MAP_TILES_SIGNING_SECRET: "dGVzdC1tYXAtc2VjcmV0IQ=="
     MAP_TILES_CACHE_SIZE: "64m"
     MAP_TILES_CACHE_TTL: "12h"
     MAP_TILES_CACHE_INACTIVE: "1h"

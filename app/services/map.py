@@ -40,7 +40,10 @@ def create_map_tile_session(
     *,
     now: int | None = None,
 ) -> MapTileSessionResponse:
-    if not config.MAP_TILES_ENABLED or len(config.MAP_TILES_SIGNING_SECRET) < 32:
+    if (
+        not config.MAP_TILES_ENABLED
+        or len(config.MAP_TILES_SIGNING_SECRET) < 24
+    ):
         raise MapTilesNotConfiguredError
 
     current_time = int(time.time()) if now is None else now
@@ -57,6 +60,9 @@ def create_map_tile_session(
             f"?expires={expires_at}&signature={signature}"
         ),
         expires_at=expires_at,
+        default_latitude=config.MAP_DEFAULT_LATITUDE,
+        default_longitude=config.MAP_DEFAULT_LONGITUDE,
+        default_zoom=config.MAP_DEFAULT_ZOOM,
     )
 
 
