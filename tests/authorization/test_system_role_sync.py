@@ -176,8 +176,19 @@ async def test_sync_is_idempotent(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("system_key", "legacy_name"),
+    [
+        (SystemRoleKey.ADMINISTRATOR, "Administrator"),
+        (SystemRoleKey.COMPANY_MANAGER, "Company Manager"),
+        (SystemRoleKey.DEPARTMENT_MANAGER, "Department Manager"),
+        (SystemRoleKey.EMPLOYEE, "Employee"),
+    ],
+)
 async def test_sync_restores_system_role_metadata(
     db_session: AsyncSession,
+    system_key: SystemRoleKey,
+    legacy_name: str,
 ):
     await sync_permissions(
         db_session
@@ -197,24 +208,22 @@ async def test_sync_restores_system_role_metadata(
         )
     )
 
-    administrator = next(
+    role = next(
         role
         for role in roles
         if (
             role.system_key
-            == SystemRoleKey.ADMINISTRATOR.value
+            == system_key.value
         )
     )
 
-    original_id = administrator.id
+    original_id = role.id
 
-    administrator.name = (
-        "Renamed Administrator"
-    )
-    administrator.description = (
+    role.name = legacy_name
+    role.description = (
         "Modified description"
     )
-    administrator.is_active = False
+    role.is_active = False
 
     await db_session.commit()
 
@@ -225,12 +234,12 @@ async def test_sync_restores_system_role_metadata(
         )
     )
 
-    administrator = next(
+    role = next(
         role
         for role in synced
         if (
             role.system_key
-            == SystemRoleKey.ADMINISTRATOR.value
+            == system_key.value
         )
     )
 
@@ -240,25 +249,25 @@ async def test_sync_restores_system_role_metadata(
         in SYSTEM_ROLE_TEMPLATES
         if (
             template.key
-            == SystemRoleKey.ADMINISTRATOR
+            == system_key
         )
     )
 
-    assert administrator.id == (
+    assert role.id == (
         original_id
     )
 
     assert (
-        administrator.name
+        role.name
         == template.name
     )
 
     assert (
-        administrator.description
+        role.description
         == template.description
     )
 
-    assert administrator.is_active is True
+    assert role.is_active is True
 
 
 @pytest.mark.asyncio
@@ -276,7 +285,7 @@ async def test_sync_rejects_custom_role_with_system_role_name(
 
     custom_role = Role(
         company_id=company.id,
-        name="Administrator",
+        name="Администратор",
         description="Custom administrator",
         is_system=False,
         system_key=None,
@@ -309,7 +318,7 @@ async def test_sync_rejects_custom_role_with_system_role_name(
     )
 
     assert exc.value.role_name == (
-        "Administrator"
+        "Администратор"
     )
 
     assert (
@@ -343,13 +352,13 @@ async def test_sync_rolls_back_partial_system_role_creation_on_conflict(
     company_id = company.id
 
     #
-    # Administrator будет создан первым,
-    # а Company Manager вызовет конфликт.
+    # Администратор будет создан первым,
+    # а Руководитель компании вызовет конфликт.
     #
     db_session.add(
         Role(
             company_id=company_id,
-            name="Company Manager",
+            name="Руководитель компании",
             description="Custom role",
             is_system=False,
             system_key=None,

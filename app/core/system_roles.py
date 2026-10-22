@@ -243,10 +243,10 @@ EMPLOYEE_PERMISSIONS = (
 SYSTEM_ROLE_TEMPLATES = (
     SystemRoleTemplate(
         key=SystemRoleKey.ADMINISTRATOR,
-        name="Administrator",
+        name="Администратор",
         description=(
-            "Full administrative access "
-            "within the company."
+            "Полный административный доступ "
+            "в пределах компании."
         ),
         permissions=(
             ADMINISTRATOR_PERMISSIONS
@@ -261,10 +261,10 @@ SYSTEM_ROLE_TEMPLATES = (
 
     SystemRoleTemplate(
         key=SystemRoleKey.COMPANY_MANAGER,
-        name="Company Manager",
+        name="Руководитель компании",
         description=(
-            "Manages company structure, "
-            "employees and operational work."
+            "Управление структурой компании, "
+            "сотрудниками и текущей работой."
         ),
         permissions=(
             COMPANY_MANAGER_PERMISSIONS
@@ -277,10 +277,10 @@ SYSTEM_ROLE_TEMPLATES = (
 
     SystemRoleTemplate(
         key=SystemRoleKey.DEPARTMENT_MANAGER,
-        name="Department Manager",
+        name="Руководитель подразделения",
         description=(
-            "Manages employees and work "
-            "within the assigned unit tree."
+            "Управление сотрудниками и работой "
+            "в своём подразделении и его дочерних подразделениях."
         ),
         permissions=(
             DEPARTMENT_MANAGER_PERMISSIONS
@@ -292,10 +292,10 @@ SYSTEM_ROLE_TEMPLATES = (
 
     SystemRoleTemplate(
         key=SystemRoleKey.EMPLOYEE,
-        name="Employee",
+        name="Сотрудник",
         description=(
-            "Basic employee access to own "
-            "unit and personal resources."
+            "Базовый доступ к своему подразделению "
+            "и личным ресурсам."
         ),
         permissions=EMPLOYEE_PERMISSIONS,
         assignable_role_keys=(),
