@@ -48,6 +48,7 @@ from services.company import (
     CompanyRootMoveForbiddenError,
     ParentCompanyNotFoundError,
     create_child_company_with_administrator,
+    create_child_company_with_administrator_within_tree,
     get_company,
     get_company_tree,
     move_company_within_tree,
@@ -159,6 +160,81 @@ async def create_child_company_endpoint(
         )
 
     except ParentCompanyNotFoundError:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Company not found",
+        )
+
+    except (
+        CompanyAdministratorRoleUnavailableError
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail=(
+                "Company bootstrap failed"
+            ),
+        )
+
+
+@router.post(
+    (
+        "/{company_id}"
+        "/tree/{parent_company_id}"
+        "/children"
+    ),
+    response_model=CompanyResponse,
+    status_code=(
+        status.HTTP_201_CREATED
+    ),
+)
+async def create_child_company_within_tree_endpoint(
+    company_id: int,
+    parent_company_id: int,
+    data: CompanyChildCreate,
+
+    context: Annotated[
+        CurrentCompanyContext,
+        Depends(
+            require_permission(
+                PermissionCode.COMPANIES_MANAGE,
+                minimum_scope=(
+                    PermissionScope.COMPANY
+                ),
+            )
+        ),
+    ],
+
+    session: Annotated[
+        AsyncSession,
+        Depends(get_session),
+    ],
+) -> CompanyResponse:
+    ensure_company_matches_context(
+        company_id=company_id,
+        context=context,
+    )
+
+    try:
+        return (
+            await create_child_company_with_administrator_within_tree(
+                session,
+                root_company_id=company_id,
+                parent_company_id=parent_company_id,
+                administrator_user_id=(
+                    context.user.id
+                ),
+                data=data,
+            )
+        )
+
+    except (
+        CompanyNotFoundError,
+        ParentCompanyNotFoundError,
+    ):
         raise HTTPException(
             status_code=(
                 status.HTTP_404_NOT_FOUND

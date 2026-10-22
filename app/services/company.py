@@ -702,6 +702,42 @@ async def create_child_company_with_administrator(
     )
 
 
+async def create_child_company_with_administrator_within_tree(
+    session: AsyncSession,
+    *,
+    root_company_id: int,
+    parent_company_id: int,
+    administrator_user_id: int,
+    data: CompanyChildCreate,
+) -> Company:
+    companies = await get_company_subtree(
+        session,
+        root_company_id,
+    )
+
+    if not companies:
+        raise CompanyNotFoundError
+
+    parent = next(
+        (
+            company
+            for company in companies
+            if company.id == parent_company_id
+        ),
+        None,
+    )
+
+    if parent is None or not parent.is_active:
+        raise ParentCompanyNotFoundError
+
+    return await create_child_company_with_administrator(
+        session,
+        parent_company_id=parent_company_id,
+        administrator_user_id=administrator_user_id,
+        data=data,
+    )
+
+
 async def create_root_company_with_administrator(
     session: AsyncSession,
     *,

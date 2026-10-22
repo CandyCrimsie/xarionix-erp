@@ -274,6 +274,100 @@ async def test_child_creation_requires_path_company_to_match_context(
 
 
 @pytest.mark.asyncio
+async def test_administrator_can_create_child_under_descendant_from_root_context(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = await initialize_and_login(
+        api_client
+    )
+
+    root_id = setup["company_id"]
+    headers = {
+        "Authorization": (
+            f"Bearer {login['access_token']}"
+        ),
+        "X-Company-Id": str(root_id),
+    }
+
+    parent_response = await api_client.post(
+        f"/api/v1/companies/{root_id}/children",
+        json={
+            "name": "Regional Company",
+        },
+        headers=headers,
+    )
+
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/{root_id}"
+            f"/tree/{parent_id}/children"
+        ),
+        json={
+            "name": "Local Branch",
+            "short_name": "LOCAL",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    child = response.json()
+    assert child["parent_id"] == parent_id
+    assert child["name"] == "Local Branch"
+    assert child["short_name"] == "LOCAL"
+
+
+@pytest.mark.asyncio
+async def test_scoped_child_creation_rejects_parent_from_another_root(
+    api_client: AsyncClient,
+    clean_test_redis,
+):
+    setup, login = await initialize_and_login(
+        api_client
+    )
+
+    root_id = setup["company_id"]
+    authorization = (
+        f"Bearer {login['access_token']}"
+    )
+
+    other_root_response = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": "Other Root",
+        },
+        headers={
+            "Authorization": authorization,
+        },
+    )
+
+    assert other_root_response.status_code == 201
+    other_root_id = other_root_response.json()["id"]
+
+    response = await api_client.post(
+        (
+            f"/api/v1/companies/{root_id}"
+            f"/tree/{other_root_id}/children"
+        ),
+        json={
+            "name": "Forbidden Branch",
+        },
+        headers={
+            "Authorization": authorization,
+            "X-Company-Id": str(root_id),
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Company not found",
+    }
+
+
+@pytest.mark.asyncio
 async def test_company_tree_returns_nested_descendants(
     api_client: AsyncClient,
     clean_test_redis,
