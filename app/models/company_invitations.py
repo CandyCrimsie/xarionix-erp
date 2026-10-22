@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     String,
@@ -82,6 +83,15 @@ class CompanyInvitation(Base):
         String(12),
         nullable=False,
     )
+
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    middle_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Historical values are preserved, not parsed or used for new invitations.
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(254), nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

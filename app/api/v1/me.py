@@ -12,6 +12,7 @@ from dependencies.database import get_session
 from models.users import User
 
 from schemas.company import CompanyResponse
+from schemas.employee import MyProfileResponse, EMPLOYEE_DETAIL_FIELDS
 
 from services.company_memberships import (
     list_available_companies_for_user,
@@ -29,6 +30,19 @@ router = APIRouter(
     prefix="/me",
     tags=["Current User"],
 )
+
+
+@router.get("/profile", response_model=MyProfileResponse)
+async def get_my_profile(context: CurrentCompany) -> MyProfileResponse:
+    return MyProfileResponse(
+        user_id=context.user.id,
+        username=context.user.username,
+        company_id=context.company.id,
+        company_name=context.company.name,
+        account_created_at=context.user.created_at,
+        joined_at=context.membership.created_at,
+        **{field: getattr(context.membership, field) for field in EMPLOYEE_DETAIL_FIELDS},
+    )
 
 
 @router.get(

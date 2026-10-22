@@ -38,6 +38,7 @@ from schemas.invitations import (
     InvitationListScope,
     InvitationStatus,
 )
+from schemas.employee import EmployeeDetails, EMPLOYEE_DETAIL_FIELDS
 
 
 class InvitationNotFoundError(Exception):
@@ -210,11 +211,13 @@ async def accept_invitation_for_new_user(
             password_hash=hash_password(password),
         )
 
-        await create_company_membership(
+        membership = await create_company_membership(
             session,
             user_id=user.id,
             company_id=company.id,
         )
+        for field in EMPLOYEE_DETAIL_FIELDS:
+            setattr(membership, field, getattr(invitation, field))
 
         invitation.accepted_at = (
             datetime.now(timezone.utc)
@@ -265,11 +268,13 @@ async def accept_invitation_for_existing_user(
                 InvitationMembershipAlreadyExistsError
             )
 
-        await create_company_membership(
+        membership = await create_company_membership(
             session,
             user_id=user_id,
             company_id=company.id,
         )
+        for field in EMPLOYEE_DETAIL_FIELDS:
+            setattr(membership, field, getattr(invitation, field))
 
         invitation.accepted_at = (
             datetime.now(timezone.utc)
@@ -300,6 +305,7 @@ async def create_invitation(
     company_id: int,
     created_by_membership_id: int,
     expires_in_hours: int | None,
+    employee: EmployeeDetails | None = None,
 ) -> tuple[
     CompanyInvitation,
     str,
@@ -343,6 +349,7 @@ async def create_invitation(
                     hours=lifetime_hours
                 )
             ),
+            **(employee.model_dump(include=EMPLOYEE_DETAIL_FIELDS) if employee is not None else {}),
         )
     )
 

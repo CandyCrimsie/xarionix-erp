@@ -47,6 +47,7 @@ from services.address_hierarchy import (
     validate_address_object_hierarchy,
     validate_building_parent,
 )
+from services.building_coordinates import lock_building, synchronize_building_markers
 
 
 class AddressObjectNotFoundError(Exception):
@@ -380,7 +381,7 @@ async def update_building(
     building_id: int,
     data: BuildingUpdate,
 ) -> BuildingResponse:
-    building = await get_building(session, building_id)
+    building = await lock_building(session, building_id)
     if building is None:
         raise BuildingNotFoundError
     values = data.model_dump(exclude_unset=True)
@@ -391,10 +392,15 @@ async def update_building(
     await validate_building_parent(session, address_object_id)
     _apply_building_values(building, values)
     try:
+        if {"latitude", "longitude"} & values.keys():
+            await synchronize_building_markers(session, building)
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
         raise DuplicateBuildingError from exc
+    except Exception:
+        await session.rollback()
+        raise
     record = await get_building_record(session, building_id)
     assert record is not None
     return building_response(record)

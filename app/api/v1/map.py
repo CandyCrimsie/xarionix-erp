@@ -24,6 +24,7 @@ from services.map import (
     get_map_buildings,
 )
 from services.map_markers import (
+    MapMarkerSyncConflictError,
     MapMarkerBuildingNotFoundError,
     MapMarkerNotFoundError,
     create_marker,
@@ -210,6 +211,11 @@ async def update_map_marker_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Map marker not found",
+        ) from exc
+    except MapMarkerSyncConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
         ) from exc
     except MapMarkerBuildingNotFoundError as exc:
         raise HTTPException(

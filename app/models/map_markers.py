@@ -19,10 +19,10 @@ from database.base import Base
 
 
 class MapMarker(Base):
-    """Company-owned map annotation with an independent fixed position.
+    """Company annotation; building-coordinate synchronization is opt-in.
 
-    ``building_id`` is an optional informational link. Coordinates are always
-    owned by the marker and never follow later building-coordinate changes.
+    Legacy/informational links keep their independent position. Synchronized
+    annotations share only the global building's physical point, not metadata.
     """
 
     __tablename__ = "map_markers"
@@ -62,6 +62,9 @@ class MapMarker(Base):
         ForeignKey("buildings.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
+    )
+    sync_building_coordinates: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

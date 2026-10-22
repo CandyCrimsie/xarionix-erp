@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,12 @@ async def create_company_invitation(
     token_hash: str,
     token_prefix: str,
     expires_at: datetime,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    middle_name: str | None = None,
+    email: str | None = None,
+    phone_number: str | None = None,
+    date_of_birth: date | None = None,
 ) -> CompanyInvitation:
     invitation = CompanyInvitation(
         company_id=company_id,
@@ -39,6 +45,12 @@ async def create_company_invitation(
         token_hash=token_hash,
         token_prefix=token_prefix,
         expires_at=expires_at,
+        first_name=first_name,
+        last_name=last_name,
+        middle_name=middle_name,
+        email=email,
+        phone_number=phone_number,
+        date_of_birth=date_of_birth,
     )
 
     session.add(invitation)

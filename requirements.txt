@@ -5,6 +5,7 @@ SQLAlchemy==2.0.52
 psycopg[binary]==3.3.4
 
 pydantic-settings==2.15.0
+email-validator==2.3.0
 
 loguru==0.7.3
 

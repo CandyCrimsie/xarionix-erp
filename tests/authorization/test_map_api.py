@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 from urllib.parse import parse_qs, urlparse
@@ -5,7 +6,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.config import config
 from core.permissions.scopes import PermissionScope
@@ -14,6 +15,11 @@ from models.membership_roles import MembershipRole
 from models.permissions import Permission
 from models.role_permissions import RolePermission
 from models.roles import Role
+from models.buildings import Building
+from models.map_markers import MapMarker
+from schemas.map_markers import MapMarkerCreate
+from services import map_markers as marker_service
+from services import addresses as address_service
 from services.address_types import sync_system_address_types
 from services.auth import register_user
 
@@ -442,6 +448,7 @@ async def test_map_marker_crud_persists_and_is_company_scoped(
         {"name": "<svg onload=alert(1)>"},
         {"description": "<script>alert(1)</script>"},
         {"label_text": "x" * 81},
+        {"sync_building_coordinates": True},
     ],
 )
 async def test_map_marker_validation_rejects_unsafe_or_out_of_range_values(
@@ -512,3 +519,277 @@ async def test_map_marker_permissions_allow_readers_but_deny_management(
             json=marker_payload(),
         )
     ).status_code == 201
+
+
+async def marker_building_context(db_session, api_client):
+    company_id, token, types = await initialize_context(db_session, api_client)
+    headers = company_headers(token, company_id)
+    city = await create_address_object(
+        api_client, headers, type_id=types["city"], name="Раменское"
+    )
+    street = await create_address_object(
+        api_client, headers, type_id=types["street"], name="Гагарина", parent_id=city["id"]
+    )
+    building = await create_building(
+        api_client, headers, parent_id=street["id"], number="53",
+        latitude=None, longitude=None,
+    )
+    return company_id, token, headers, building
+
+
+@pytest.mark.asyncio
+async def test_synchronized_marker_sets_building_point_and_follows_address_edits(db_session, api_client):
+    _, _, headers, building = await marker_building_context(db_session, api_client)
+    created = await api_client.post(
+        "/api/v1/map/markers", headers=headers,
+        json=marker_payload(building_id=building["id"], sync_building_coordinates=True),
+    )
+    assert created.status_code == 201, created.text
+    marker_id = created.json()["id"]
+    house = (await api_client.get(f"/api/v1/buildings/{building['id']}", headers=headers)).json()
+    assert float(house["latitude"]) == pytest.approx(55.577276)
+    assert float(house["longitude"]) == pytest.approx(38.245099)
+    points = await api_client.get(
+        "/api/v1/map/buildings", headers=headers,
+        params={"west": 38, "south": 55, "east": 39, "north": 56},
+    )
+    assert [item["properties"]["id"] for item in points.json()["features"]] == [building["id"]]
+
+    changed = await api_client.patch(
+        f"/api/v1/buildings/{building['id']}", headers=headers,
+        json={"latitude": 56.1, "longitude": 40.2},
+    )
+    assert changed.status_code == 200, changed.text
+    marker = (await api_client.get(f"/api/v1/map/markers/{marker_id}", headers=headers)).json()
+    assert (marker["latitude"], marker["longitude"]) == (56.1, 40.2)
+    # Viewport filtering uses the synchronized stored point, not an old snapshot.
+    old = await api_client.get(
+        "/api/v1/map/markers", headers=headers,
+        params={"west": 38, "south": 55, "east": 39, "north": 56},
+    )
+    assert old.json() == []
+    renamed = await api_client.patch(
+        f"/api/v1/map/markers/{marker_id}", headers=headers, json={"name": "Дом 53"}
+    )
+    assert (renamed.json()["latitude"], renamed.json()["longitude"]) == (56.1, 40.2)
+    moved = await api_client.patch(
+        f"/api/v1/map/markers/{marker_id}", headers=headers, json={"longitude": 40.3}
+    )
+    assert moved.status_code == 200, moved.text
+    house = (await api_client.get(f"/api/v1/buildings/{building['id']}", headers=headers)).json()
+    assert (float(house["latitude"]), float(house["longitude"])) == (56.1, 40.3)
+
+
+@pytest.mark.asyncio
+async def test_legacy_informational_marker_keeps_independent_coordinates(db_session, api_client):
+    _, _, headers, building = await marker_building_context(db_session, api_client)
+    created = await api_client.post(
+        "/api/v1/map/markers", headers=headers, json=marker_payload(building_id=building["id"])
+    )
+    assert created.status_code == 201
+    assert created.json()["sync_building_coordinates"] is False
+    house = (await api_client.get(f"/api/v1/buildings/{building['id']}", headers=headers)).json()
+    assert house["latitude"] is None
+    await api_client.patch(
+        f"/api/v1/buildings/{building['id']}", headers=headers,
+        json={"latitude": 56, "longitude": 40},
+    )
+    marker = (await api_client.get(f"/api/v1/map/markers/{created.json()['id']}", headers=headers)).json()
+    assert marker["latitude"] == pytest.approx(55.577276)
+    assert marker["longitude"] == pytest.approx(38.245099)
+
+
+@pytest.mark.asyncio
+async def test_building_sync_shares_only_physical_point_not_company_annotations(db_session, api_client):
+    _, token, headers, building = await marker_building_context(db_session, api_client)
+    company_b = await api_client.post(
+        "/api/v1/companies", headers={"Authorization": f"Bearer {token}"},
+        json={"name": "Company B"},
+    )
+    headers_b = company_headers(token, company_b.json()["id"])
+    ids = []
+    for company_headers_ in (headers, headers_b):
+        response = await api_client.post(
+            "/api/v1/map/markers", headers=company_headers_,
+            json=marker_payload(building_id=building["id"], sync_building_coordinates=True),
+        )
+        assert response.status_code == 201, response.text
+        ids.append(response.json()["id"])
+    moved = await api_client.patch(
+        f"/api/v1/map/markers/{ids[0]}", headers=headers,
+        json={"latitude": 56, "name": "Private company A annotation"},
+    )
+    assert moved.status_code == 200, moved.text
+    other = (await api_client.get(f"/api/v1/map/markers/{ids[1]}", headers=headers_b)).json()
+    assert other["latitude"] == 56
+    assert other["name"] == "Узел связи №1"
+    assert (await api_client.get(f"/api/v1/map/markers/{ids[0]}", headers=headers_b)).status_code == 404
+    assert [item["id"] for item in (await api_client.get("/api/v1/map/markers", headers=headers)).json()] == ids[:1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("editing", [False, True])
+async def test_marker_and_building_coordinate_change_roll_back_together(
+    db_session, api_client, monkeypatch, editing
+):
+    _, _, headers, building = await marker_building_context(db_session, api_client)
+    if editing:
+        created = await api_client.post(
+            "/api/v1/map/markers", headers=headers,
+            json=marker_payload(building_id=building["id"], sync_building_coordinates=True),
+        )
+        marker_id = created.json()["id"]
+
+    async def fail_sync(*args):
+        raise RuntimeError("simulated synchronization failure")
+
+    monkeypatch.setattr(marker_service, "synchronize_building_markers", fail_sync)
+    with pytest.raises(RuntimeError, match="simulated synchronization failure"):
+        if editing:
+            await api_client.patch(
+                f"/api/v1/map/markers/{marker_id}", headers=headers, json={"latitude": 57}
+            )
+        else:
+            await api_client.post(
+                "/api/v1/map/markers", headers=headers,
+                json=marker_payload(building_id=building["id"], sync_building_coordinates=True),
+            )
+    house = (await api_client.get(f"/api/v1/buildings/{building['id']}", headers=headers)).json()
+    if editing:
+        assert float(house["latitude"]) == pytest.approx(55.577276)
+    else:
+        assert house["latitude"] is None
+    markers = (await api_client.get("/api/v1/map/markers", headers=headers)).json()
+    assert len(markers) == (1 if editing else 0)
+    if editing:
+        assert markers[0]["latitude"] == pytest.approx(55.577276)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["unlink", "disable", "delete", "clear_house"])
+async def test_stopping_sync_preserves_independent_annotation_or_house(db_session, api_client, action):
+    _, _, headers, building = await marker_building_context(db_session, api_client)
+    response = await api_client.post(
+        "/api/v1/map/markers", headers=headers,
+        json=marker_payload(building_id=building["id"], sync_building_coordinates=True),
+    )
+    marker_id = response.json()["id"]
+    if action == "delete":
+        response = await api_client.delete(f"/api/v1/map/markers/{marker_id}", headers=headers)
+    elif action == "clear_house":
+        response = await api_client.patch(
+            f"/api/v1/buildings/{building['id']}", headers=headers,
+            json={"latitude": None, "longitude": None},
+        )
+    else:
+        response = await api_client.patch(
+            f"/api/v1/map/markers/{marker_id}", headers=headers,
+            json={"building_id": None} if action == "unlink" else {"sync_building_coordinates": False},
+        )
+    assert response.status_code in (200, 204), response.text
+    if action != "delete":
+        marker = (await api_client.get(f"/api/v1/map/markers/{marker_id}", headers=headers)).json()
+        assert marker["sync_building_coordinates"] is False
+        assert marker["latitude"] == pytest.approx(55.577276)
+    house = (await api_client.get(f"/api/v1/buildings/{building['id']}", headers=headers)).json()
+    if action == "clear_house":
+        assert house["latitude"] is None
+    else:
+        assert float(house["latitude"]) == pytest.approx(55.577276)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_synchronized_markers_finish_with_one_canonical_building_point(db_session, api_client):
+    company_id, _, headers, building = await marker_building_context(db_session, api_client)
+    sessions = async_sessionmaker(db_session.bind, expire_on_commit=False, autoflush=False)
+
+    async def place(latitude):
+        async with sessions() as session:
+            return await marker_service.create_marker(
+                session, company_id=company_id,
+                data=MapMarkerCreate(**marker_payload(
+                    building_id=building["id"], sync_building_coordinates=True, latitude=latitude
+                )),
+            )
+
+    await asyncio.wait_for(asyncio.gather(place(56), place(57)), timeout=10)
+    async with sessions() as session:
+        house = await session.get(Building, building["id"])
+        markers = list((await session.scalars(select(MapMarker))).all())
+        assert len(markers) == 2
+        assert house.latitude in (56, 57)
+        assert all(marker.latitude == house.latitude for marker in markers)
+
+
+@pytest.mark.asyncio
+async def test_sync_can_be_enabled_on_existing_link_and_moved_to_another_house(db_session, api_client):
+    _, _, headers, building = await marker_building_context(db_session, api_client)
+    created = await api_client.post(
+        "/api/v1/map/markers", headers=headers, json=marker_payload(building_id=building["id"])
+    )
+    marker_id = created.json()["id"]
+    enabled = await api_client.patch(
+        f"/api/v1/map/markers/{marker_id}", headers=headers, json={"sync_building_coordinates": True}
+    )
+    assert enabled.status_code == 200, enabled.text
+    first_house = (await api_client.get(f"/api/v1/buildings/{building['id']}", headers=headers)).json()
+    assert float(first_house["latitude"]) == pytest.approx(55.577276)
+    other = await create_building(
+        api_client, headers, parent_id=building["address_object_id"], number="55",
+        latitude=None, longitude=None,
+    )
+    relinked = await api_client.patch(
+        f"/api/v1/map/markers/{marker_id}", headers=headers, json={"building_id": other["id"]}
+    )
+    assert relinked.status_code == 200, relinked.text
+    await api_client.patch(
+        f"/api/v1/buildings/{building['id']}", headers=headers, json={"latitude": 57}
+    )
+    marker = (await api_client.get(f"/api/v1/map/markers/{marker_id}", headers=headers)).json()
+    assert marker["latitude"] == pytest.approx(55.577276)
+    second_house = (await api_client.get(f"/api/v1/buildings/{other['id']}", headers=headers)).json()
+    assert float(second_house["latitude"]) == pytest.approx(55.577276)
+
+
+@pytest.mark.asyncio
+async def test_address_coordinate_save_rolls_back_when_marker_synchronization_fails(
+    db_session, api_client, monkeypatch
+):
+    _, _, headers, building = await marker_building_context(db_session, api_client)
+    created = await api_client.post(
+        "/api/v1/map/markers", headers=headers,
+        json=marker_payload(building_id=building["id"], sync_building_coordinates=True),
+    )
+
+    async def fail_sync(session, house):
+        # Fail after the building change has already reached PostgreSQL.
+        await session.flush()
+        raise RuntimeError("simulated address synchronization failure")
+
+    monkeypatch.setattr(address_service, "synchronize_building_markers", fail_sync)
+    with pytest.raises(RuntimeError, match="simulated address synchronization failure"):
+        await api_client.patch(
+            f"/api/v1/buildings/{building['id']}", headers=headers,
+            json={"latitude": 57, "longitude": 40},
+        )
+    house = (await api_client.get(f"/api/v1/buildings/{building['id']}", headers=headers)).json()
+    marker = (await api_client.get(f"/api/v1/map/markers/{created.json()['id']}", headers=headers)).json()
+    assert float(house["latitude"]) == marker["latitude"] == pytest.approx(55.577276)
+
+
+@pytest.mark.asyncio
+async def test_sync_without_a_house_and_unknown_house_are_rejected_without_mutation(db_session, api_client):
+    _, _, headers, building = await marker_building_context(db_session, api_client)
+    created = await api_client.post("/api/v1/map/markers", headers=headers, json=marker_payload())
+    missing_link = await api_client.patch(
+        f"/api/v1/map/markers/{created.json()['id']}", headers=headers,
+        json={"sync_building_coordinates": True},
+    )
+    assert missing_link.status_code == 409
+    unknown = await api_client.post(
+        "/api/v1/map/markers", headers=headers,
+        json=marker_payload(building_id=999999, sync_building_coordinates=True),
+    )
+    assert unknown.status_code == 404
+    house = (await api_client.get(f"/api/v1/buildings/{building['id']}", headers=headers)).json()
+    assert house["latitude"] is None

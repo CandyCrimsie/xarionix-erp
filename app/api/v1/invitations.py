@@ -46,6 +46,7 @@ from schemas.invitations import (
     InvitationPublicResponse,
     InvitationTokenRequest,
 )
+from schemas.employee import EMPLOYEE_DETAIL_FIELDS
 from services.invitations import (
     InvitationAcceptedError,
     InvitationExpiredError,
@@ -287,6 +288,7 @@ def _invitation_response(
         created_by_username=(
             created_by_username
         ),
+        **{field: getattr(invitation, field) for field in EMPLOYEE_DETAIL_FIELDS},
     )
 
 
@@ -391,6 +393,7 @@ async def create_company_invitation_endpoint(
                 expires_in_hours=(
                     data.expires_in_hours
                 ),
+                employee=data,
             )
         )
 

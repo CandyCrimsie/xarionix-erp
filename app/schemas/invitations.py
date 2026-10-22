@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
 )
 
@@ -10,6 +11,7 @@ from schemas.user import (
     UserCreate,
     UserResponse,
 )
+from schemas.employee import EmployeeDetails, EmployeeDetailsResponse
 
 
 class InvitationListScope(StrEnum):
@@ -24,14 +26,16 @@ class InvitationStatus(StrEnum):
     REVOKED = "revoked"
 
 
-class CompanyInvitationCreate(BaseModel):
+class CompanyInvitationCreate(EmployeeDetails):
+    model_config = ConfigDict(extra="forbid")
+
     expires_in_hours: int | None = Field(
         default=None,
         ge=1,
     )
 
 
-class CompanyInvitationResponse(BaseModel):
+class CompanyInvitationResponse(EmployeeDetailsResponse):
     id: int
     company_id: int
 

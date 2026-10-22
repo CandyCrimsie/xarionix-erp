@@ -5,7 +5,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from models.company import Company
 from models.company_memberships import (
@@ -49,6 +49,13 @@ class CompanyMemberSummary:
 
     created_at: datetime
     updated_at: datetime
+    first_name: str | None = None
+    last_name: str | None = None
+    middle_name: str | None = None
+    full_name: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+    date_of_birth: date | None = None
 
 
 async def get_company_member_summaries(
@@ -93,6 +100,13 @@ async def get_company_member_summaries(
             CompanyMembership.updated_at.label(
                 "updated_at"
             ),
+            CompanyMembership.first_name,
+            CompanyMembership.last_name,
+            CompanyMembership.middle_name,
+            CompanyMembership.full_name,
+            CompanyMembership.email,
+            CompanyMembership.phone_number,
+            CompanyMembership.date_of_birth,
         )
         .join(
             User,

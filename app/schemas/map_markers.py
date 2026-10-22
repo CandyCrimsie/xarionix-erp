@@ -26,6 +26,7 @@ def _clean_text(value: str, *, allow_empty: bool = False) -> str:
 
 class MapMarkerCreate(BaseModel):
     building_id: int | None = Field(default=None, gt=0)
+    sync_building_coordinates: bool = False
     name: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     latitude: float = Field(ge=-90, le=90)
@@ -46,6 +47,12 @@ class MapMarkerCreate(BaseModel):
     marker_opacity: float = Field(default=1, ge=0, le=1)
     marker_size: MapMarkerSize = "normal"
     marker_shape: MapMarkerShape = "rounded"
+
+    @model_validator(mode="after")
+    def require_building_for_sync(self) -> "MapMarkerCreate":
+        if self.sync_building_coordinates and self.building_id is None:
+            raise ValueError("Building is required for coordinate synchronization")
+        return self
 
     @field_validator("name")
     @classmethod
@@ -89,6 +96,7 @@ class MapMarkerCreate(BaseModel):
 
 class MapMarkerUpdate(BaseModel):
     building_id: int | None = Field(default=None, gt=0)
+    sync_building_coordinates: bool | None = None
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     latitude: float | None = Field(default=None, ge=-90, le=90)
@@ -150,6 +158,7 @@ class MapMarkerResponse(BaseModel):
     id: int
     company_id: int
     building_id: int | None
+    sync_building_coordinates: bool
     name: str
     description: str | None
     latitude: float
@@ -172,3 +181,10 @@ class MapMarkerResponse(BaseModel):
     marker_shape: MapMarkerShape
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def ignore_deleted_building_sync(self) -> "MapMarkerResponse":
+        # The FK deliberately preserves annotations via ON DELETE SET NULL.
+        if self.building_id is None:
+            self.sync_building_coordinates = False
+        return self

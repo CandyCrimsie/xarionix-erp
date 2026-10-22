@@ -8,6 +8,7 @@ from pydantic import (
 from models.organizational_units import (
     OrganizationalUnitType,
 )
+from schemas.employee import EmployeeDetailsResponse
 
 
 class CompanyMembershipCreate(BaseModel):
@@ -20,7 +21,7 @@ class CompanyMembershipUpdate(BaseModel):
     is_active: bool
 
 
-class CompanyMembershipResponse(BaseModel):
+class CompanyMembershipResponse(EmployeeDetailsResponse):
     model_config = ConfigDict(
         from_attributes=True,
     )
@@ -37,7 +38,7 @@ class CompanyMembershipResponse(BaseModel):
 
 
 class CompanyMemberSummaryResponse(
-    BaseModel
+    EmployeeDetailsResponse
 ):
     model_config = ConfigDict(
         from_attributes=True,
