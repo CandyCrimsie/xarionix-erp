@@ -9,6 +9,7 @@ from sqlalchemy import Float, and_, bindparam, case, func, literal, or_, select,
 from sqlalchemy.orm import aliased
 
 from core.map_domain import MapOperationError, check_version, lock_map_company, require_write, visible_to
+from core.map_geometry import geometry_token, segment_position
 from models.buildings import Building
 from models.map_connections import MapConnection
 from models.map_markers import MapMarker
@@ -60,6 +61,7 @@ def connection_response(row, *, user_id, can_manage):
         geometry={"type": "LineString", "coordinates": points} if points else None,
         length_m=route_length(points) if points else None,
         position_missing=missing,
+        geometry_token=geometry_token(points),
         can_manage=c.owner_user_id == user_id if c.visibility == "private" else can_manage,
     )
 
@@ -187,6 +189,85 @@ async def delete_connection(session, *, company_id, user_id, can_manage, connect
         require_write(entity, user_id, can_manage)
         await session.delete(entity)
         await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+
+async def split_connection(session, *, company_id, user_id, can_manage, connection_id, data):
+    """One company lock + endpoint row locks, one commit, no intermediate CRUD commits.
+
+    Keep the original ID for A→M. No other table references connection IDs;
+    the new M→B inherits all cable, visibility and ownership attributes.
+    """
+    from services.map_markers import get_marker
+    from schemas.map_connections import MapConnectionSplitResponse
+
+    try:
+        await lock_map_company(session, company_id)
+        current = await session.scalar(select(MapConnection).where(
+            MapConnection.id == connection_id, *visible_to(MapConnection, company_id, user_id)
+        ).with_for_update().execution_options(populate_existing=True))
+        if current is None:
+            raise MapOperationError("not_found", "Соединение не найдено", status=404)
+        require_write(current, user_id, can_manage)
+        check_version(current, data.expected_version)
+        # A splice is a technical object, not a personal note. Keep the same
+        # addresses.manage rule as ordinary marker creation, even on private lines.
+        if not can_manage:
+            raise MapOperationError("permission_denied", "Для создания муфты требуется право управления адресами.", status=403)
+        await lock_buildings(session, {i for i in (current.source_building_id, current.target_building_id) if i})
+        marker_ids = {i for i in (current.source_marker_id, current.target_marker_id) if i}
+        if marker_ids:
+            await session.execute(select(MapMarker).where(MapMarker.id.in_(marker_ids)).order_by(MapMarker.id).with_for_update())
+        snapshot = await get_connection(session, company_id=company_id, user_id=user_id, can_manage=can_manage, connection_id=connection_id)
+        if snapshot.geometry_token != data.expected_geometry_token:
+            raise MapOperationError("stale_geometry", "Расположение концов трассы изменилось. Обновите соединение и выберите точку заново.")
+        if snapshot.geometry is None:
+            raise MapOperationError("missing_position", "У концов трассы отсутствуют координаты.", status=422)
+        points = snapshot.geometry["coordinates"]
+        index = data.segment_index
+        if index >= len(points) - 1:
+            raise MapOperationError("invalid_segment", "Выбранный сегмент отсутствует.", status=422)
+        if route_length(points[index:index + 2]) < .01:
+            raise MapOperationError("degenerate_segment", "Нельзя вставить муфту в вырожденный сегмент.", status=422)
+        expected = segment_position(points[index], points[index + 1], data.fraction)
+        requested = [data.position.longitude, data.position.latitude]
+        # Only allow numeric rounding, never silently snap a forged off-line point.
+        if route_length([expected, requested]) > .05:
+            raise MapOperationError("off_route", "Точка не соответствует выбранному месту трассы.", status=422)
+        position = [round(expected[0], 7), round(expected[1], 7)]
+        left, right = points[:index + 1], points[index + 1:]
+        # At a bend the vertex becomes the endpoint, not a duplicate vertex.
+        if left[-1] == position:
+            left = left[:-1]
+        if right[0] == position:
+            right = right[1:]
+        first, second = [*left, position], [position, *right]
+        if route_length(first) < 1 or route_length(second) < 1:
+            raise MapOperationError("near_endpoint", "Муфта должна находиться не ближе 1 м по трассе от каждого конца.", status=422)
+        marker = MapMarker(company_id=company_id, owner_user_id=current.owner_user_id,
+            visibility=current.visibility, point_type="splice", building_link_role="none",
+            latitude=position[1], longitude=position[0], **data.marker.model_dump())
+        session.add(marker)
+        await session.flush()
+        tail = MapConnection(company_id=company_id, **{key: getattr(current, key) for key in (
+            "owner_user_id", "visibility", "name", "description", "medium", "status", "fiber_count", "category",
+            "target_building_id", "target_marker_id",
+        )}, source_marker_id=marker.id, vertices=second[1:-1])
+        current.target_building_id = None
+        current.target_marker_id = marker.id
+        current.vertices = first[1:-1]
+        current.version += 1
+        session.add(tail)
+        await session.flush()
+        # Build responses before the only commit, still holding every lock.
+        result = MapConnectionSplitResponse(
+            marker=await get_marker(session, company_id=company_id, user_id=user_id, can_manage=can_manage, marker_id=marker.id),
+            connections=tuple([await get_connection(session, company_id=company_id, user_id=user_id, can_manage=can_manage, connection_id=i) for i in (current.id, tail.id)]),
+        )
+        await session.commit()
+        return result
     except Exception:
         await session.rollback()
         raise

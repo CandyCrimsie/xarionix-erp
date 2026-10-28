@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from schemas.map_markers import MapMarkerAppearance, Visibility, _clean_text
+from schemas.map_markers import BuildingPosition, MapMarkerAppearance, MapMarkerResponse, Visibility, _clean_text
 
 
 class BuildingEndpoint(BaseModel):
@@ -62,6 +62,28 @@ class MapConnectionUpdate(MapConnectionCreate):
     expected_version: int = Field(gt=0)
 
 
+class SplitSpliceMarker(MapMarkerAppearance):
+    """Only descriptive/visual fields; topology and ownership are server-owned."""
+    icon_name: str | None = "splice"
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("name", "description")
+    @classmethod
+    def clean_text(cls, value, info):
+        return _clean_text(value, allow_empty=info.field_name != "name") if value is not None else None
+
+
+class MapConnectionSplit(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    expected_version: int = Field(gt=0, strict=True)
+    expected_geometry_token: str = Field(pattern=r"^[0-9a-f]{64}$")
+    segment_index: int = Field(ge=0, le=498, strict=True)
+    fraction: float = Field(ge=0, le=1)
+    position: BuildingPosition
+    marker: SplitSpliceMarker
+
+
 class EndpointResponse(BaseModel):
     kind: Literal["building", "marker"]
     id: int
@@ -89,8 +111,14 @@ class MapConnectionResponse(BaseModel):
     position_missing: bool
     can_manage: bool
     version: int
+    geometry_token: str
     created_at: datetime
     updated_at: datetime
+
+
+class MapConnectionSplitResponse(BaseModel):
+    marker: MapMarkerResponse
+    connections: tuple[MapConnectionResponse, MapConnectionResponse]
 
 
 class MapStylePresetCreate(BaseModel):

@@ -19,6 +19,7 @@ from schemas.map import (
 from schemas.map_markers import MapMarkerCreate, MapMarkerResponse, MapMarkerUpdate
 from schemas.map_connections import MapConnectionCreate, MapConnectionUpdate, MapConnectionResponse, MapStylePresetCreate, MapStylePresetUpdate, MapStylePresetResponse
 from services import map_connections as graph
+from schemas.map_connections import MapConnectionSplit, MapConnectionSplitResponse
 from services.authorization import AuthorizationService
 from services.map import (
     MapAddressObjectNotFoundError,
@@ -315,6 +316,11 @@ async def connection_detail(connection_id: int, context: MapReadContext, session
 @router.patch("/connections/{connection_id}", response_model=MapConnectionResponse)
 async def change_connection(connection_id: int, data: MapConnectionUpdate, context: MapReadContext, session: DatabaseSession):
     return await graph.save_connection(session, **await actor(session, context), data=data, connection_id=connection_id)
+
+
+@router.post("/connections/{connection_id}/split", response_model=MapConnectionSplitResponse, status_code=201)
+async def split_connection(connection_id: int, data: MapConnectionSplit, context: MapReadContext, session: DatabaseSession):
+    return await graph.split_connection(session, **await actor(session, context), data=data, connection_id=connection_id)
 
 
 @router.delete("/connections/{connection_id}", status_code=204)
