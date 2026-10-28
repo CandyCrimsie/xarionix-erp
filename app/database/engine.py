@@ -50,6 +50,10 @@ async def initialize_database() -> None:
             text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
         )
         await _extend_development_schema(connection)
+        from database.map_upgrade import upgrade_map_schema
+        report = await upgrade_map_schema(connection)
+        if report["upgrade_required"]:
+            print("Map schema upgrade:", report)
         await connection.run_sync(Base.metadata.create_all)
 
 

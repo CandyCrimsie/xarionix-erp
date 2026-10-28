@@ -1,16 +1,19 @@
-from decimal import Decimal
+import hashlib
+import hmac
+import json
 
+from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.buildings import Building
+from core.config import config
+from core.map_domain import MapOperationError, check_version, lock_map_company, require_write, visible_to
+from models.map_connections import MapConnection
 from models.map_markers import MapMarker
-from repositories.map_markers import get_map_marker, list_map_markers
+from repositories.addresses import get_building_record
+from repositories.map_markers import get_map_marker, list_map_markers, marker_records_query
 from schemas.map_markers import MapMarkerCreate, MapMarkerResponse, MapMarkerUpdate
-from services.building_coordinates import (
-    lock_building,
-    lock_buildings,
-    synchronize_building_markers,
-)
+from services.building_coordinates import lock_buildings, set_building_position
 
 
 class MapMarkerNotFoundError(Exception):
@@ -25,141 +28,176 @@ class MapMarkerSyncConflictError(Exception):
     pass
 
 
-async def get_markers(
-    session: AsyncSession,
-    *,
-    company_id: int,
-    west: Decimal | None = None,
-    south: Decimal | None = None,
-    east: Decimal | None = None,
-    north: Decimal | None = None,
-) -> list[MapMarkerResponse]:
-    return [
-        MapMarkerResponse.model_validate(marker)
-        for marker in await list_map_markers(
-            session,
-            company_id=company_id,
-            west=west,
-            south=south,
-            east=east,
-            north=north,
-        )
-    ]
+def marker_response(row, *, user_id: int, can_manage: bool) -> MapMarkerResponse:
+    marker, building, full_address = row
+    result = MapMarkerResponse.model_validate(marker)
+    if marker.building_link_role == "represents":
+        result.latitude = float(building.latitude) if building and building.latitude is not None else None
+        result.longitude = float(building.longitude) if building and building.longitude is not None else None
+    result.building_full_address = full_address if building else None
+    result.can_manage = marker.owner_user_id == user_id if marker.visibility == "private" else can_manage
+    return result
 
 
-async def get_marker(
-    session: AsyncSession,
-    *,
-    company_id: int,
-    marker_id: int,
-) -> MapMarkerResponse:
-    marker = await get_map_marker(
-        session, company_id=company_id, marker_id=marker_id
-    )
-    if marker is None:
+async def get_markers(session, *, company_id, user_id, can_manage=False, **bounds):
+    rows = await list_map_markers(session, company_id=company_id, user_id=user_id, **bounds)
+    if len(rows) > 5000:
+        raise MapOperationError("viewport_too_large", "Слишком много меток. Увеличьте масштаб.", status=422)
+    return [marker_response(row, user_id=user_id, can_manage=can_manage) for row in rows]
+
+
+async def get_marker(session, *, company_id, marker_id, user_id, can_manage=False):
+    row = (await session.execute(marker_records_query().where(
+        MapMarker.id == marker_id, *visible_to(MapMarker, company_id, user_id)
+    ).execution_options(populate_existing=True))).one_or_none()
+    if row is None:
         raise MapMarkerNotFoundError
-    return MapMarkerResponse.model_validate(marker)
+    return marker_response(row, user_id=user_id, can_manage=can_manage)
 
 
-async def _validate_building(
-    session: AsyncSession, building_id: int | None
-) -> Building | None:
-    building = await lock_building(session, building_id) if building_id is not None else None
-    if building_id is not None and building is None:
-        raise MapMarkerBuildingNotFoundError
-    return building
+def _position(building):
+    return {"latitude": float(building.latitude) if building.latitude is not None else None, "longitude": float(building.longitude) if building.longitude is not None else None, "updated_at": str(building.updated_at)} if building else None
 
 
-async def create_marker(
-    session: AsyncSession,
-    *,
-    company_id: int,
-    data: MapMarkerCreate,
-) -> MapMarkerResponse:
-    building = await _validate_building(session, data.building_id)
-    marker = MapMarker(company_id=company_id, **data.model_dump())
-    session.add(marker)
+async def _binding_snapshot(session, *, marker, target, occupant, values):
+    async def house_info(building_id):
+        record = await get_building_record(session, building_id) if building_id else None
+        return {"id": building_id, "address": record.full_address, "position": _position(record.building)} if record else None
+    snapshot = {
+        "marker": {"id": marker.id, "version": marker.version, "name": marker.name, "building_id": marker.building_id} if marker else None,
+        "previous_building": await house_info(marker.building_id) if marker and marker.building_link_role == "represents" else None,
+        "target_building": await house_info(target.id),
+        "previous_marker": {"id": occupant.id, "version": occupant.version, "name": occupant.name} if occupant else None,
+        "requested_name": values["name"],
+        "requested_position": values.get("building_position"),
+    }
+    operation = {key: value for key, value in values.items() if key not in {"binding_confirmation", "expected_version"}}
+    secret = config.JWT_SECRET
+    if hasattr(secret, "get_secret_value"):
+        secret = secret.get_secret_value()
+    token = hmac.new(str(secret).encode(), json.dumps([snapshot, operation], sort_keys=True, default=str).encode(), hashlib.sha256).hexdigest()
+    return snapshot, token
+
+
+async def _save_marker(session: AsyncSession, *, company_id, user_id, can_manage, data, marker_id=None):
     try:
-        if marker.sync_building_coordinates:
-            assert building is not None
-            building.latitude = marker.latitude
-            building.longitude = marker.longitude
-            await session.flush()
-            await synchronize_building_markers(session, building)
+        await lock_map_company(session, company_id)
+        marker = await get_map_marker(session, company_id=company_id, marker_id=marker_id, user_id=user_id) if marker_id else None
+        if marker_id and marker is None:
+            raise MapMarkerNotFoundError
+        if marker:
+            require_write(marker, user_id, can_manage)
+            check_version(marker, data.expected_version)
+        changes = data.model_dump(exclude_unset=True) if marker else data.model_dump()
+        if changes.get("sync_building_coordinates"):
+            raise MapOperationError("legacy_coordinate_sync_removed", "Выберите роль связи с домом. Для изменения его точки используйте «Изменить расположение дома».", status=422)
+        values = {column.name: getattr(marker, column.name) for column in MapMarker.__table__.columns} if marker else {}
+        values.update(changes)
+        building_id = values.get("building_id")
+        # Compatibility: a bare old building_id is always informational.
+        link = values.get("building_link_role")
+        if link is None or ("building_id" in changes and "building_link_role" not in changes):
+            link = "reference" if building_id is not None else "none"
+        visibility = values.get("visibility") or ("private" if values["point_type"] == "note" else "company")
+        if not can_manage and (visibility != "private" or values["point_type"] != "note"):
+            raise MapOperationError("permission_denied", "Недостаточно прав для общего или технического объекта", status=403)
+        if link == "represents" and (visibility != "company" or values["point_type"] != "building"):
+            raise MapOperationError("invalid_building_link", "Основная метка дома должна быть общим объектом типа «Дом».", status=422)
+        if (link == "none") != (building_id is None):
+            raise MapOperationError("invalid_building_link", "Выберите дом и роль его связи либо снимите привязку.", status=422)
+        buildings = await lock_buildings(session, {id_ for id_ in [building_id, marker.building_id if marker else None] if id_ is not None})
+        building = buildings.get(building_id)
+        if building_id is not None and building is None:
+            raise MapMarkerBuildingNotFoundError
+        if marker:
+            await session.refresh(marker, with_for_update=True)
+        if marker and marker.visibility != visibility:
+            dependent = await session.scalar(select(MapConnection.id).where(or_(
+                MapConnection.source_marker_id == marker.id, MapConnection.target_marker_id == marker.id
+            )).limit(1))
+            if dependent:
+                raise MapOperationError("visibility_has_connections", "Перед изменением видимости удалите или переназначьте соединения.")
+        if values.get("building_position") and (link != "represents" or not can_manage):
+            raise MapOperationError("permission_denied", "Изменить расположение общего дома можно только с правом управления адресами.", status=403)
+        if link == "represents":
+            if marker and marker.building_link_role != "represents" and await session.scalar(
+                select(MapConnection.id).where(or_(MapConnection.source_marker_id == marker.id, MapConnection.target_marker_id == marker.id)).limit(1)
+            ):
+                raise MapOperationError("endpoint_has_connections", "Сначала переназначьте линии самостоятельного объекта. Изменение оформления не переподключает их к дому.")
+            occupant = await session.scalar(select(MapMarker).where(
+                MapMarker.company_id == company_id, MapMarker.building_id == building_id,
+                MapMarker.building_link_role == "represents",
+                MapMarker.id != marker_id if marker_id else True,
+            ).with_for_update())
+            moving = marker and marker.building_link_role == "represents" and marker.building_id != building_id
+            if occupant or moving:
+                snapshot, token = await _binding_snapshot(session, marker=marker, target=building, occupant=occupant, values=values)
+                if not hmac.compare_digest(changes.get("binding_confirmation") or "", token):
+                    raise MapOperationError("building_binding_conflict", "Подтвердите перепривязку дома.", snapshot=snapshot, confirmation_token=token)
+            if occupant:
+                occupant.latitude, occupant.longitude = building.latitude, building.longitude
+                occupant.building_link_role = "reference"
+                occupant.version += 1
+                await session.flush()
+            if values.get("building_position"):
+                await set_building_position(session, building, **values["building_position"])
+            values["latitude"] = values["longitude"] = None
+        else:
+            if marker and marker.building_link_role == "represents":
+                old = buildings.get(marker.building_id)
+                if "latitude" not in changes and old:
+                    values["latitude"], values["longitude"] = old.latitude, old.longitude
+            if (values.get("latitude") is None) != (values.get("longitude") is None):
+                raise MapOperationError("invalid_position", "Укажите широту и долготу вместе.", status=422)
+            if not marker and values.get("latitude") is None:
+                raise MapOperationError("missing_position", "Выберите точку на карте.", status=422)
+        values.update(visibility=visibility, building_link_role=link, owner_user_id=user_id if visibility == "private" else None, sync_building_coordinates=False)
+        fields = set(MapMarker.__table__.columns.keys()) - {"id", "company_id", "created_at", "updated_at", "version"}
+        if marker:
+            for name in fields:
+                if name in values:
+                    setattr(marker, name, values[name])
+            marker.version += 1
+        else:
+            marker = MapMarker(company_id=company_id, **{name: value for name, value in values.items() if name in fields})
+            session.add(marker)
+        await session.flush()
+        saved_id = marker.id
+        await session.commit()
+        return await get_marker(session, company_id=company_id, marker_id=saved_id, user_id=user_id, can_manage=can_manage)
+    except IntegrityError as exc:
+        await session.rollback()
+        raise MapOperationError("building_binding_conflict", "Привязка изменилась. Повторите сохранение и подтвердите актуальные связи.") from exc
+    except Exception:
+        await session.rollback()
+        raise
+
+
+async def create_marker(session, *, company_id, user_id, can_manage, data: MapMarkerCreate):
+    return await _save_marker(session, company_id=company_id, user_id=user_id, can_manage=can_manage, data=data)
+
+
+async def update_marker(session, *, company_id, user_id, can_manage, marker_id, data: MapMarkerUpdate):
+    return await _save_marker(session, company_id=company_id, user_id=user_id, can_manage=can_manage, marker_id=marker_id, data=data)
+
+
+async def delete_marker(session, *, company_id, marker_id, user_id, can_manage):
+    try:
+        await lock_map_company(session, company_id)
+        marker = await get_map_marker(session, company_id=company_id, marker_id=marker_id, user_id=user_id)
+        if marker is None:
+            raise MapMarkerNotFoundError
+        require_write(marker, user_id, can_manage)
+        dependencies = list((await session.scalars(select(MapConnection).where(or_(
+            MapConnection.source_marker_id == marker_id, MapConnection.target_marker_id == marker_id
+        )))).all())
+        if dependencies:
+            raise MapOperationError("endpoint_has_connections", "Сначала удалите или переназначьте присоединённые линии.", connections=[
+                {"id": row.id, "name": row.name, "medium": row.medium, "status": row.status}
+                for row in dependencies if row.company_id == company_id and (row.visibility == "company" or row.owner_user_id == user_id)
+            ])
+        await session.delete(marker)
         await session.commit()
     except Exception:
         await session.rollback()
         raise
-    await session.refresh(marker)
-    return MapMarkerResponse.model_validate(marker)
-
-
-async def update_marker(
-    session: AsyncSession,
-    *,
-    company_id: int,
-    marker_id: int,
-    data: MapMarkerUpdate,
-) -> MapMarkerResponse:
-    marker = await get_map_marker(
-        session, company_id=company_id, marker_id=marker_id
-    )
-    if marker is None:
-        raise MapMarkerNotFoundError
-    values = data.model_dump(exclude_unset=True)
-    previous_building_id = marker.building_id
-    building_id = values.get("building_id", previous_building_id)
-    # Lock both sides in ID order for concurrent A -> B / B -> A relinks.
-    buildings = await lock_buildings(
-        session, {id_ for id_ in (previous_building_id, building_id) if id_ is not None}
-    )
-    building = buildings.get(building_id)
-    if building_id is not None and building is None:
-        raise MapMarkerBuildingNotFoundError
-    # Building -> marker is also the lock order used by address edits, avoiding
-    # deadlocks. Recheck the link after acquiring locks instead of using stale
-    # state from a concurrent relink.
-    await session.refresh(marker, with_for_update=True)
-    if marker.building_id != previous_building_id:
-        await session.rollback()
-        raise MapMarkerSyncConflictError("Marker link changed; reload the marker")
-    if building_id is None:
-        if values.get("sync_building_coordinates"):
-            await session.rollback()
-            raise MapMarkerSyncConflictError("Building is required for coordinate synchronization")
-        values["sync_building_coordinates"] = False
-    enable_sync = values.get("sync_building_coordinates") and not marker.sync_building_coordinates
-    try:
-        for field_name, value in values.items():
-            setattr(marker, field_name, value)
-        if marker.sync_building_coordinates and (
-            enable_sync
-            or building_id != previous_building_id
-            or {"latitude", "longitude"} & values.keys()
-        ):
-            assert building is not None
-            building.latitude = marker.latitude
-            building.longitude = marker.longitude
-            await session.flush()
-            await synchronize_building_markers(session, building)
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        raise
-    await session.refresh(marker)
-    return MapMarkerResponse.model_validate(marker)
-
-
-async def delete_marker(
-    session: AsyncSession,
-    *,
-    company_id: int,
-    marker_id: int,
-) -> None:
-    marker = await get_map_marker(
-        session, company_id=company_id, marker_id=marker_id
-    )
-    if marker is None:
-        raise MapMarkerNotFoundError
-    await session.delete(marker)
-    await session.commit()

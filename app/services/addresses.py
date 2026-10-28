@@ -410,10 +410,13 @@ async def delete_building(
     session: AsyncSession,
     building_id: int,
 ) -> None:
-    building = await get_building(session, building_id)
+    building = await lock_building(session, building_id)
     if building is None:
         raise BuildingNotFoundError
     if await building_has_entrances_or_locations(session, building_id):
+        raise BuildingNotEmptyError
+    from services.building_coordinates import detach_deleted_building
+    if not await detach_deleted_building(session, building):
         raise BuildingNotEmptyError
     await session.delete(building)
     await _commit_delete(

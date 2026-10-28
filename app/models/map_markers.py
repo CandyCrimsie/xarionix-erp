@@ -8,6 +8,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
+    UniqueConstraint,
+    text,
     Numeric,
     String,
     Text,
@@ -19,11 +22,7 @@ from database.base import Base
 
 
 class MapMarker(Base):
-    """Company annotation; building-coordinate synchronization is opt-in.
-
-    Legacy/informational links keep their independent position. Synchronized
-    annotations share only the global building's physical point, not metadata.
-    """
+    """Company/private point. Primary house styles use Building's canonical position."""
 
     __tablename__ = "map_markers"
     __table_args__ = (
@@ -48,6 +47,14 @@ class MapMarker(Base):
             name="ck_map_markers_border_width_range",
         ),
         Index("ix_map_markers_company_coordinates", "company_id", "longitude", "latitude"),
+        UniqueConstraint("company_id", "id", name="uq_map_markers_company_id"),
+        CheckConstraint("visibility IN ('company', 'private') AND ((visibility = 'company' AND owner_user_id IS NULL) OR (visibility = 'private' AND owner_user_id IS NOT NULL))", name="ck_map_markers_visibility"),
+        CheckConstraint("building_link_role IN ('none', 'reference', 'located_at', 'represents') AND ((building_link_role = 'none' AND building_id IS NULL) OR (building_link_role <> 'none' AND building_id IS NOT NULL))", name="ck_map_markers_building_link"),
+        CheckConstraint("building_link_role <> 'represents' OR (visibility = 'company' AND point_type = 'building' AND latitude IS NULL AND longitude IS NULL)", name="ck_map_markers_represents"),
+        CheckConstraint("(latitude IS NULL) = (longitude IS NULL)", name="ck_map_markers_coordinate_pair"),
+        CheckConstraint("point_type IN ('building', 'network_node', 'cabinet', 'splice', 'pole', 'chamber', 'equipment', 'note')", name="ck_map_markers_point_type"),
+        Index("uq_map_markers_represents", "company_id", "building_id", unique=True, postgresql_where=text("building_link_role = 'represents'")),
+        Index("ix_map_markers_visibility_owner", "company_id", "visibility", "owner_user_id", "id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -66,10 +73,15 @@ class MapMarker(Base):
     sync_building_coordinates: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="company", server_default="company")
+    owner_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    point_type: Mapped[str] = mapped_column(String(24), nullable=False, default="note", server_default="note")
+    building_link_role: Mapped[str] = mapped_column(String(16), nullable=False, default="none", server_default="none")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    latitude: Mapped[Decimal] = mapped_column(Numeric(10, 7), nullable=False)
-    longitude: Mapped[Decimal] = mapped_column(Numeric(10, 7), nullable=False)
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
     icon_name: Mapped[str | None] = mapped_column(String(40), nullable=True)
     label_text: Mapped[str | None] = mapped_column(String(80), nullable=True)
     icon_color: Mapped[str] = mapped_column(String(7), nullable=False, default="#FFFFFF")

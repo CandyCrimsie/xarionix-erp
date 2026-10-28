@@ -3,16 +3,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from core.map_markers import (
-    MAP_MARKER_SHAPES,
-    MAP_MARKER_SIZES,
-    SUPPORTED_MAP_MARKER_ICONS,
-)
-
+from core.map_markers import SUPPORTED_MAP_MARKER_ICONS
 
 HEX_COLOR_PATTERN = r"^#[0-9A-Fa-f]{6}$"
 MapMarkerSize = Literal["small", "normal", "large"]
 MapMarkerShape = Literal["circle", "rounded", "pill", "icon"]
+Visibility = Literal["company", "private"]
+PointType = Literal["building", "network_node", "cabinet", "splice", "pole", "chamber", "equipment", "note"]
+BuildingLinkRole = Literal["none", "represents", "located_at", "reference"]
 
 
 def _clean_text(value: str, *, allow_empty: bool = False) -> str:
@@ -24,78 +22,82 @@ def _clean_text(value: str, *, allow_empty: bool = False) -> str:
     return cleaned
 
 
-class MapMarkerCreate(BaseModel):
-    building_id: int | None = Field(default=None, gt=0)
-    sync_building_coordinates: bool = False
-    name: str = Field(min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=2000)
-    latitude: float = Field(ge=-90, le=90)
-    longitude: float = Field(ge=-180, le=180)
-    icon_name: str | None = Field(default="map-pin", max_length=40)
+class MapMarkerAppearance(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    icon_name: str | None = Field(default="note", max_length=40)
     label_text: str | None = Field(default=None, max_length=80)
-    icon_color: str = Field(default="#FFFFFF", pattern=HEX_COLOR_PATTERN)
+    icon_color: str = Field(default="#E3EAF3", pattern=HEX_COLOR_PATTERN)
     icon_opacity: float = Field(default=1, ge=0, le=1)
-    text_color: str = Field(default="#FFFFFF", pattern=HEX_COLOR_PATTERN)
+    text_color: str = Field(default="#E3EAF3", pattern=HEX_COLOR_PATTERN)
     text_opacity: float = Field(default=1, ge=0, le=1)
     background_enabled: bool = True
-    background_color: str = Field(default="#2563EB", pattern=HEX_COLOR_PATTERN)
-    background_opacity: float = Field(default=0.9, ge=0, le=1)
+    background_color: str = Field(default="#222E3E", pattern=HEX_COLOR_PATTERN)
+    background_opacity: float = Field(default=1, ge=0, le=1)
     border_enabled: bool = True
-    border_color: str = Field(default="#FFFFFF", pattern=HEX_COLOR_PATTERN)
-    border_width: float = Field(default=2, ge=0, le=8)
+    border_color: str = Field(default="#3B485A", pattern=HEX_COLOR_PATTERN)
+    border_width: float = Field(default=1, ge=0, le=8)
     border_opacity: float = Field(default=1, ge=0, le=1)
     marker_opacity: float = Field(default=1, ge=0, le=1)
     marker_size: MapMarkerSize = "normal"
-    marker_shape: MapMarkerShape = "rounded"
+    marker_shape: MapMarkerShape = "circle"
 
-    @model_validator(mode="after")
-    def require_building_for_sync(self) -> "MapMarkerCreate":
-        if self.sync_building_coordinates and self.building_id is None:
-            raise ValueError("Building is required for coordinate synchronization")
-        return self
-
-    @field_validator("name")
+    @field_validator("label_text")
     @classmethod
-    def clean_name(cls, value: str) -> str:
-        return _clean_text(value)
-
-    @field_validator("description", "label_text")
-    @classmethod
-    def clean_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = _clean_text(value, allow_empty=True)
-        return cleaned or None
+    def clean_label(cls, value):
+        return (_clean_text(value, allow_empty=True) or None) if value is not None else None
 
     @field_validator("icon_name")
     @classmethod
-    def validate_icon(cls, value: str | None) -> str | None:
+    def validate_icon(cls, value):
         if value is not None and value not in SUPPORTED_MAP_MARKER_ICONS:
             raise ValueError("Unsupported map marker icon")
         return value
 
     @field_validator("icon_color", "text_color", "background_color", "border_color")
     @classmethod
-    def normalize_color(cls, value: str) -> str:
+    def normalize_color(cls, value):
         return value.upper()
 
-    @field_validator("marker_size")
-    @classmethod
-    def validate_size(cls, value: str) -> str:
-        if value not in MAP_MARKER_SIZES:
-            raise ValueError("Unsupported map marker size")
-        return value
 
-    @field_validator("marker_shape")
+class BuildingPosition(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class MapMarkerCreate(MapMarkerAppearance):
+    building_id: int | None = Field(default=None, gt=0)
+    building_link_role: BuildingLinkRole | None = None
+    point_type: PointType = "note"
+    visibility: Visibility | None = None
+    sync_building_coordinates: bool = False
+    building_position: BuildingPosition | None = None
+    binding_confirmation: str | None = Field(default=None, max_length=128)
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+    @field_validator("name")
     @classmethod
-    def validate_shape(cls, value: str) -> str:
-        if value not in MAP_MARKER_SHAPES:
-            raise ValueError("Unsupported map marker shape")
-        return value
+    def clean_name(cls, value):
+        return _clean_text(value)
+
+    @field_validator("description")
+    @classmethod
+    def clean_description(cls, value):
+        return (_clean_text(value, allow_empty=True) or None) if value is not None else None
 
 
 class MapMarkerUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    expected_version: int | None = Field(default=None, gt=0)
+    binding_confirmation: str | None = Field(default=None, max_length=128)
+    building_position: BuildingPosition | None = None
     building_id: int | None = Field(default=None, gt=0)
+    building_link_role: BuildingLinkRole | None = None
+    point_type: PointType | None = None
+    visibility: Visibility | None = None
     sync_building_coordinates: bool | None = None
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
@@ -118,73 +120,37 @@ class MapMarkerUpdate(BaseModel):
     marker_size: MapMarkerSize | None = None
     marker_shape: MapMarkerShape | None = None
 
-    @field_validator("name")
-    @classmethod
-    def clean_name(cls, value: str | None) -> str | None:
-        return None if value is None else _clean_text(value)
-
-    @field_validator("description", "label_text")
-    @classmethod
-    def clean_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = _clean_text(value, allow_empty=True)
-        return cleaned or None
-
-    @field_validator("icon_name")
-    @classmethod
-    def validate_icon(cls, value: str | None) -> str | None:
-        if value is not None and value not in SUPPORTED_MAP_MARKER_ICONS:
-            raise ValueError("Unsupported map marker icon")
-        return value
-
-    @field_validator("icon_color", "text_color", "background_color", "border_color")
-    @classmethod
-    def normalize_color(cls, value: str | None) -> str | None:
-        return value.upper() if value is not None else None
-
     @model_validator(mode="after")
-    def reject_null_required_fields(self) -> "MapMarkerUpdate":
-        nullable = {"building_id", "description", "icon_name", "label_text"}
-        for field_name in self.model_fields_set - nullable:
-            if getattr(self, field_name) is None:
-                raise ValueError(f"{field_name} cannot be null")
+    def validate_fields(self):
+        nullable = {"building_id", "description", "icon_name", "label_text", "latitude", "longitude", "building_position", "binding_confirmation"}
+        for name in self.model_fields_set - nullable:
+            if getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        for name in self.model_fields_set & {"name", "description", "label_text"}:
+            value = getattr(self, name)
+            if value is not None:
+                setattr(self, name, _clean_text(value, allow_empty=name != "name") or None)
+        if self.icon_name is not None and self.icon_name not in SUPPORTED_MAP_MARKER_ICONS:
+            raise ValueError("Unsupported map marker icon")
         return self
 
 
-class MapMarkerResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+class MapMarkerResponse(MapMarkerAppearance):
+    model_config = ConfigDict(from_attributes=True, extra="ignore", allow_inf_nan=False)
     id: int
     company_id: int
+    owner_user_id: int | None
+    visibility: Visibility
+    point_type: PointType
+    building_link_role: BuildingLinkRole
     building_id: int | None
-    sync_building_coordinates: bool
+    building_full_address: str | None = None
+    sync_building_coordinates: bool = False
+    latitude: float | None
+    longitude: float | None
     name: str
     description: str | None
-    latitude: float
-    longitude: float
-    icon_name: str | None
-    label_text: str | None
-    icon_color: str
-    icon_opacity: float
-    text_color: str
-    text_opacity: float
-    background_enabled: bool
-    background_color: str
-    background_opacity: float
-    border_enabled: bool
-    border_color: str
-    border_width: float
-    border_opacity: float
-    marker_opacity: float
-    marker_size: MapMarkerSize
-    marker_shape: MapMarkerShape
+    version: int
+    can_manage: bool = False
     created_at: datetime
     updated_at: datetime
-
-    @model_validator(mode="after")
-    def ignore_deleted_building_sync(self) -> "MapMarkerResponse":
-        # The FK deliberately preserves annotations via ON DELETE SET NULL.
-        if self.building_id is None:
-            self.sync_building_coordinates = False
-        return self

@@ -1,14 +1,15 @@
-"""One physical building point shared by explicitly synchronized annotations.
+"""The building is the only coordinate store for its represents markers.
 
-Callers lock the building before changing it, then update markers in the same
-transaction. Only coordinates are shared across companies, never marker data.
+Connection endpoints are resolved when read; moving a point never rewrites
+every attached line or overwrites its intermediate vertices.
 """
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.buildings import Building
 from models.map_markers import MapMarker
+from models.map_connections import MapConnection
 
 
 async def lock_building(session: AsyncSession, building_id: int) -> Building | None:
@@ -31,18 +32,31 @@ async def lock_buildings(session: AsyncSession, building_ids: set[int]) -> dict[
 async def synchronize_building_markers(
     session: AsyncSession, building: Building
 ) -> None:
-    # Clearing either coordinate makes the house unavailable on the map. Keep
-    # annotations at their last point, but explicitly stop synchronization.
-    values = (
-        {"latitude": building.latitude, "longitude": building.longitude}
-        if building.latitude is not None and building.longitude is not None
-        else {"sync_building_coordinates": False}
-    )
-    await session.execute(
-        update(MapMarker)
-        .where(
-            MapMarker.building_id == building.id,
-            MapMarker.sync_building_coordinates.is_(True),
-        )
-        .values(**values)
-    )
+    # Compatibility hook for the address service. No coordinate copies exist.
+    await set_building_position(session, building, latitude=building.latitude, longitude=building.longitude)
+
+
+async def set_building_position(session, building, *, latitude, longitude):
+    building.latitude = latitude if longitude is not None else None
+    building.longitude = longitude if latitude is not None else None
+    await session.flush()
+
+
+async def detach_deleted_building(session, building) -> bool:
+    dependency = await session.scalar(select(MapConnection.id).where(or_(
+        MapConnection.source_building_id == building.id,
+        MapConnection.target_building_id == building.id,
+    )).limit(1))
+    if dependency:
+        return False
+    markers = (await session.scalars(select(MapMarker).where(
+        MapMarker.building_id == building.id
+    ).order_by(MapMarker.id).with_for_update())).all()
+    for marker in markers:
+        if marker.building_link_role == "represents":
+            marker.latitude, marker.longitude = building.latitude, building.longitude
+        marker.building_link_role = "none"
+        marker.building_id = None
+        marker.version += 1
+    await session.flush()
+    return True

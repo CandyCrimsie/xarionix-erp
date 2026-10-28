@@ -1,0 +1,300 @@
+--- markers-viewport: 1000 points / 500 routes ---
+Limit  (cost=277.69..277.72 rows=12 width=1290) (actual time=0.228..0.234 rows=82.00 loops=1)
+  Buffers: shared hit=34
+  CTE address_paths
+    ->  Recursive Union  (cost=0.29..217.34 rows=101 width=104) (actual time=0.007..0.017 rows=2.00 loops=1)
+          Storage: Memory  Maximum Storage: 33kB
+          Buffers: shared hit=8
+          ->  Nested Loop  (cost=0.29..16.42 rows=1 width=104) (actual time=0.006..0.007 rows=1.00 loops=1)
+                Buffers: shared hit=4
+                ->  Index Scan using ix_address_objects_parent_id on address_objects  (cost=0.14..8.16 rows=1 width=1048) (actual time=0.002..0.003 rows=1.00 loops=1)
+                      Index Cond: (parent_id IS NULL)
+                      Index Searches: 1
+                      Buffers: shared hit=2
+                ->  Index Scan using address_types_pkey on address_types  (cost=0.14..8.16 rows=1 width=308) (actual time=0.003..0.003 rows=1.00 loops=1)
+                      Index Cond: (id = address_objects.type_id)
+                      Index Searches: 1
+                      Buffers: shared hit=2
+          ->  Nested Loop  (cost=0.47..19.99 rows=10 width=104) (actual time=0.004..0.004 rows=0.50 loops=2)
+                Buffers: shared hit=4
+                ->  Hash Join  (cost=0.33..11.39 rows=10 width=1112) (actual time=0.002..0.002 rows=0.50 loops=2)
+                      Hash Cond: (child_object.parent_id = parent_path.object_id)
+                      Buffers: shared hit=2
+                      ->  Seq Scan on address_objects child_object  (cost=0.00..10.70 rows=70 width=1056) (actual time=0.000..0.001 rows=2.00 loops=2)
+                            Buffers: shared hit=2
+                      ->  Hash  (cost=0.20..0.20 rows=10 width=72) (actual time=0.001..0.001 rows=1.00 loops=2)
+                            Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                            ->  WorkTable Scan on address_paths parent_path  (cost=0.00..0.20 rows=10 width=72) (actual time=0.000..0.000 rows=1.00 loops=2)
+                ->  Index Scan using address_types_pkey on address_types child_type  (cost=0.14..0.85 rows=1 width=308) (actual time=0.001..0.001 rows=1.00 loops=1)
+                      Index Cond: (id = child_object.type_id)
+                      Index Searches: 1
+                      Buffers: shared hit=2
+  ->  Sort  (cost=60.35..60.38 rows=12 width=1290) (actual time=0.227..0.229 rows=82.00 loops=1)
+        Sort Key: map_markers.id
+        Sort Method: quicksort  Memory: 46kB
+        Buffers: shared hit=34
+        ->  Hash Right Join  (cost=57.52..60.13 rows=12 width=1290) (actual time=0.192..0.207 rows=82.00 loops=1)
+              Hash Cond: (address_paths.object_id = buildings.address_object_id)
+              Buffers: shared hit=34
+              ->  CTE Scan on address_paths  (cost=0.00..2.02 rows=101 width=40) (actual time=0.008..0.017 rows=2.00 loops=1)
+                    Storage: Memory  Maximum Storage: 17kB
+                    Buffers: shared hit=8
+              ->  Hash  (cost=57.38..57.38 rows=12 width=1258) (actual time=0.172..0.172 rows=82.00 loops=1)
+                    Buckets: 1024  Batches: 1  Memory Usage: 25kB
+                    Buffers: shared hit=26
+                    ->  Hash Left Join  (cost=12.25..57.38 rows=12 width=1258) (actual time=0.054..0.157 rows=82.00 loops=1)
+                          Hash Cond: (map_markers.building_id = buildings.id)
+                          Filter: ((CASE WHEN ((map_markers.building_link_role)::text = 'represents'::text) THEN buildings.longitude ELSE map_markers.longitude END >= 38.025) AND (CASE WHEN ((map_markers.building_link_role)::text = 'represents'::text) THEN buildings.longitude ELSE map_markers.longitude END <= 38.045) AND (CASE WHEN ((map_markers.building_link_role)::text = 'represents'::text) THEN buildings.latitude ELSE map_markers.latitude END >= 55.53) AND (CASE WHEN ((map_markers.building_link_role)::text = 'represents'::text) THEN buildings.latitude ELSE map_markers.latitude END <= 55.57))
+                          Rows Removed by Filter: 918
+                          Buffers: shared hit=26
+                          ->  Seq Scan on map_markers  (cost=0.00..42.50 rows=1000 width=486) (actual time=0.004..0.066 rows=1000.00 loops=1)
+                                Filter: ((company_id = 1) AND (((visibility)::text = 'company'::text) OR (owner_user_id = 1)))
+                                Buffers: shared hit=25
+                          ->  Hash  (cost=11.00..11.00 rows=100 width=772) (actual time=0.002..0.002 rows=1.00 loops=1)
+                                Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                Buffers: shared hit=1
+                                ->  Seq Scan on buildings  (cost=0.00..11.00 rows=100 width=772) (actual time=0.001..0.002 rows=1.00 loops=1)
+                                      Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=199
+Planning Time: 0.305 ms
+Execution Time: 0.262 ms
+
+--- connections-viewport: 1000 points / 500 routes ---
+Limit  (cost=552.75..553.37 rows=250 width=410) (actual time=2.271..2.308 rows=500.00 loops=1)
+  Buffers: shared hit=142
+  CTE address_paths
+    ->  Recursive Union  (cost=0.29..217.34 rows=101 width=104) (actual time=0.005..0.014 rows=2.00 loops=1)
+          Storage: Memory  Maximum Storage: 33kB
+          Buffers: shared hit=8
+          ->  Nested Loop  (cost=0.29..16.42 rows=1 width=104) (actual time=0.004..0.005 rows=1.00 loops=1)
+                Buffers: shared hit=4
+                ->  Index Scan using ix_address_objects_parent_id on address_objects  (cost=0.14..8.16 rows=1 width=1048) (actual time=0.001..0.002 rows=1.00 loops=1)
+                      Index Cond: (parent_id IS NULL)
+                      Index Searches: 1
+                      Buffers: shared hit=2
+                ->  Index Scan using address_types_pkey on address_types  (cost=0.14..8.16 rows=1 width=308) (actual time=0.001..0.001 rows=1.00 loops=1)
+                      Index Cond: (id = address_objects.type_id)
+                      Index Searches: 1
+                      Buffers: shared hit=2
+          ->  Nested Loop  (cost=0.47..19.99 rows=10 width=104) (actual time=0.004..0.004 rows=0.50 loops=2)
+                Buffers: shared hit=4
+                ->  Hash Join  (cost=0.33..11.39 rows=10 width=1112) (actual time=0.002..0.002 rows=0.50 loops=2)
+                      Hash Cond: (child_object.parent_id = parent_path.object_id)
+                      Buffers: shared hit=2
+                      ->  Seq Scan on address_objects child_object  (cost=0.00..10.70 rows=70 width=1056) (actual time=0.000..0.001 rows=2.00 loops=2)
+                            Buffers: shared hit=2
+                      ->  Hash  (cost=0.20..0.20 rows=10 width=72) (actual time=0.001..0.001 rows=1.00 loops=2)
+                            Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                            ->  WorkTable Scan on address_paths parent_path  (cost=0.00..0.20 rows=10 width=72) (actual time=0.000..0.000 rows=1.00 loops=2)
+                ->  Index Scan using address_types_pkey on address_types child_type  (cost=0.14..0.85 rows=1 width=308) (actual time=0.001..0.001 rows=1.00 loops=1)
+                      Index Cond: (id = child_object.type_id)
+                      Index Searches: 1
+                      Buffers: shared hit=2
+  ->  Sort  (cost=335.41..336.04 rows=250 width=410) (actual time=2.271..2.287 rows=500.00 loops=1)
+        Sort Key: map_connections.id
+        Sort Method: quicksort  Memory: 278kB
+        Buffers: shared hit=142
+        ->  Hash Semi Join  (cost=275.73..325.46 rows=250 width=410) (actual time=2.031..2.215 rows=500.00 loops=1)
+              Hash Cond: (map_connections.id = map_connections_1.id)
+              Buffers: shared hit=142
+              ->  Hash Left Join  (cost=112.26..157.90 rows=500 width=460) (actual time=0.364..0.492 rows=500.00 loops=1)
+                    Hash Cond: (map_connections.source_building_id = buildings.id)
+                    Buffers: shared hit=75
+                    ->  Hash Right Join  (cost=94.61..138.36 rows=500 width=396) (actual time=0.359..0.452 rows=500.00 loops=1)
+                          Hash Cond: (map_markers_2.id = map_connections.target_marker_id)
+                          Buffers: shared hit=74
+                          ->  Seq Scan on map_markers map_markers_2  (cost=0.00..35.00 rows=1000 width=33) (actual time=0.001..0.030 rows=1000.00 loops=1)
+                                Buffers: shared hit=25
+                          ->  Hash  (cost=88.36..88.36 rows=500 width=371) (actual time=0.328..0.328 rows=500.00 loops=1)
+                                Buckets: 1024  Batches: 1  Memory Usage: 134kB
+                                Buffers: shared hit=49
+                                ->  Hash Left Join  (cost=65.16..88.36 rows=500 width=371) (actual time=0.155..0.270 rows=500.00 loops=1)
+                                      Hash Cond: (map_connections.source_marker_id = map_markers_1.id)
+                                      Buffers: shared hit=49
+                                      ->  Hash Left Join  (cost=17.66..39.54 rows=500 width=346) (actual time=0.023..0.093 rows=500.00 loops=1)
+                                            Hash Cond: (map_connections.target_building_id = buildings_1.id)
+                                            Buffers: shared hit=24
+                                            ->  Seq Scan on map_connections  (cost=0.00..20.00 rows=500 width=282) (actual time=0.003..0.024 rows=500.00 loops=1)
+                                                  Buffers: shared hit=15
+                                            ->  Hash  (cost=16.41..16.41 rows=100 width=72) (actual time=0.019..0.019 rows=1.00 loops=1)
+                                                  Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                                  Buffers: shared hit=9
+                                                  ->  Hash Join  (cost=3.28..16.41 rows=100 width=72) (actual time=0.018..0.019 rows=1.00 loops=1)
+                                                        Hash Cond: (buildings_1.address_object_id = address_paths_1.object_id)
+                                                        Buffers: shared hit=9
+                                                        ->  Seq Scan on buildings buildings_1  (cost=0.00..11.00 rows=100 width=402) (actual time=0.001..0.001 rows=1.00 loops=1)
+                                                              Buffers: shared hit=1
+                                                        ->  Hash  (cost=2.02..2.02 rows=101 width=40) (actual time=0.016..0.016 rows=2.00 loops=1)
+                                                              Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                                              Buffers: shared hit=8
+                                                              ->  CTE Scan on address_paths address_paths_1  (cost=0.00..2.02 rows=101 width=40) (actual time=0.006..0.015 rows=2.00 loops=1)
+                                                                    Storage: Memory  Maximum Storage: 17kB
+                                                                    Buffers: shared hit=8
+                                      ->  Hash  (cost=35.00..35.00 rows=1000 width=33) (actual time=0.130..0.130 rows=1000.00 loops=1)
+                                            Buckets: 1024  Batches: 1  Memory Usage: 78kB
+                                            Buffers: shared hit=25
+                                            ->  Seq Scan on map_markers map_markers_1  (cost=0.00..35.00 rows=1000 width=33) (actual time=0.002..0.073 rows=1000.00 loops=1)
+                                                  Buffers: shared hit=25
+                    ->  Hash  (cost=16.41..16.41 rows=100 width=72) (actual time=0.004..0.004 rows=1.00 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                          Buffers: shared hit=1
+                          ->  Hash Join  (cost=3.28..16.41 rows=100 width=72) (actual time=0.003..0.003 rows=1.00 loops=1)
+                                Hash Cond: (buildings.address_object_id = address_paths.object_id)
+                                Buffers: shared hit=1
+                                ->  Seq Scan on buildings  (cost=0.00..11.00 rows=100 width=402) (actual time=0.001..0.001 rows=1.00 loops=1)
+                                      Buffers: shared hit=1
+                                ->  Hash  (cost=2.02..2.02 rows=101 width=40) (actual time=0.001..0.001 rows=2.00 loops=1)
+                                      Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                      ->  CTE Scan on address_paths  (cost=0.00..2.02 rows=101 width=40) (actual time=0.000..0.000 rows=2.00 loops=1)
+                                            Storage: Memory  Maximum Storage: 17kB
+              ->  Hash  (cost=160.34..160.34 rows=250 width=8) (actual time=1.665..1.666 rows=500.00 loops=1)
+                    Buckets: 1024  Batches: 1  Memory Usage: 28kB
+                    Buffers: shared hit=67
+                    ->  Hash Left Join  (cost=112.63..160.34 rows=250 width=8) (actual time=0.277..1.638 rows=500.00 loops=1)
+                          Hash Cond: (map_connections_1.source_building_id = buildings_2.id)
+                          Filter: EXISTS(SubPlan 2)
+                          Buffers: shared hit=67
+                          ->  Hash Left Join  (cost=95.72..141.35 rows=500 width=165) (actual time=0.248..0.364 rows=500.00 loops=1)
+                                Hash Cond: (map_connections_1.target_building_id = buildings_3.id)
+                                Buffers: shared hit=66
+                                ->  Hash Right Join  (cost=78.81..122.56 rows=500 width=133) (actual time=0.245..0.333 rows=500.00 loops=1)
+                                      Hash Cond: (map_markers_4.id = map_connections_1.target_marker_id)
+                                      Buffers: shared hit=65
+                                      ->  Seq Scan on map_markers map_markers_4  (cost=0.00..35.00 rows=1000 width=21) (actual time=0.001..0.031 rows=1000.00 loops=1)
+                                            Buffers: shared hit=25
+                                      ->  Hash  (cost=72.56..72.56 rows=500 width=128) (actual time=0.213..0.214 rows=500.00 loops=1)
+                                            Buckets: 1024  Batches: 1  Memory Usage: 82kB
+                                            Buffers: shared hit=40
+                                            ->  Hash Left Join  (cost=47.50..72.56 rows=500 width=128) (actual time=0.116..0.183 rows=500.00 loops=1)
+                                                  Hash Cond: (map_connections_1.source_marker_id = map_markers_3.id)
+                                                  Buffers: shared hit=40
+                                                  ->  Seq Scan on map_connections map_connections_1  (cost=0.00..23.75 rows=500 width=123) (actual time=0.001..0.024 rows=500.00 loops=1)
+                                                        Filter: ((company_id = 1) AND (((visibility)::text = 'company'::text) OR (owner_user_id = 1)))
+                                                        Buffers: shared hit=15
+                                                  ->  Hash  (cost=35.00..35.00 rows=1000 width=21) (actual time=0.113..0.114 rows=1000.00 loops=1)
+                                                        Buckets: 1024  Batches: 1  Memory Usage: 63kB
+                                                        Buffers: shared hit=25
+                                                        ->  Seq Scan on map_markers map_markers_3  (cost=0.00..35.00 rows=1000 width=21) (actual time=0.001..0.060 rows=1000.00 loops=1)
+                                                              Buffers: shared hit=25
+                                ->  Hash  (cost=15.66..15.66 rows=100 width=40) (actual time=0.003..0.003 rows=1.00 loops=1)
+                                      Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                      Buffers: shared hit=1
+                                      ->  Hash Join  (cost=3.28..15.66 rows=100 width=40) (actual time=0.002..0.003 rows=1.00 loops=1)
+                                            Hash Cond: (buildings_3.address_object_id = address_paths_3.object_id)
+                                            Buffers: shared hit=1
+                                            ->  Seq Scan on buildings buildings_3  (cost=0.00..11.00 rows=100 width=48) (actual time=0.001..0.001 rows=1.00 loops=1)
+                                                  Buffers: shared hit=1
+                                            ->  Hash  (cost=2.02..2.02 rows=101 width=8) (actual time=0.001..0.001 rows=2.00 loops=1)
+                                                  Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                                  ->  CTE Scan on address_paths address_paths_3  (cost=0.00..2.02 rows=101 width=8) (actual time=0.000..0.000 rows=2.00 loops=1)
+                                                        Storage: Memory  Maximum Storage: 17kB
+                          ->  Hash  (cost=15.66..15.66 rows=100 width=40) (actual time=0.002..0.002 rows=1.00 loops=1)
+                                Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                Buffers: shared hit=1
+                                ->  Hash Join  (cost=3.28..15.66 rows=100 width=40) (actual time=0.002..0.002 rows=1.00 loops=1)
+                                      Hash Cond: (buildings_2.address_object_id = address_paths_2.object_id)
+                                      Buffers: shared hit=1
+                                      ->  Seq Scan on buildings buildings_2  (cost=0.00..11.00 rows=100 width=48) (actual time=0.000..0.000 rows=1.00 loops=1)
+                                            Buffers: shared hit=1
+                                      ->  Hash  (cost=2.02..2.02 rows=101 width=8) (actual time=0.001..0.001 rows=2.00 loops=1)
+                                            Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                            ->  CTE Scan on address_paths address_paths_2  (cost=0.00..2.02 rows=101 width=8) (actual time=0.000..0.000 rows=2.00 loops=1)
+                                                  Storage: Memory  Maximum Storage: 17kB
+                          SubPlan 2
+                            ->  Subquery Scan on segments  (cost=0.04..7.52 rows=50 width=0) (actual time=0.002..0.002 rows=1.00 loops=500)
+                                  Filter: ((segments.next IS NOT NULL) AND (lseg(point(((segments.value ->> 0))::double precision, ((segments.value ->> 1))::double precision), point(((segments.next ->> 0))::double precision, ((segments.next ->> 1))::double precision)) ?# '(38.045,55.57),(38.025,55.53)'::box))
+                                  ->  WindowAgg  (cost=0.04..2.52 rows=100 width=72) (actual time=0.002..0.002 rows=1.00 loops=500)
+                                        Window: w1 AS (ORDER BY points.ordinal)
+                                        Storage: Memory  Maximum Storage: 17kB
+                                        ->  Function Scan on jsonb_array_elements points  (cost=0.02..1.02 rows=100 width=40) (actual time=0.002..0.002 rows=2.00 loops=500)
+Planning:
+  Buffers: shared hit=186 read=1
+Planning Time: 1.069 ms
+Execution Time: 2.369 ms
+
+--- connections-endpoint: 1000 points / 500 routes ---
+Limit  (cost=291.01..291.02 rows=2 width=410) (actual time=0.020..0.022 rows=1.00 loops=1)
+  Buffers: shared hit=18
+  CTE address_paths
+    ->  Recursive Union  (cost=0.29..217.34 rows=101 width=104) (actual time=0.003..0.003 rows=1.00 loops=1)
+          Storage: Memory  Maximum Storage: 33kB
+          Buffers: shared hit=4
+          ->  Nested Loop  (cost=0.29..16.42 rows=1 width=104) (actual time=0.003..0.003 rows=1.00 loops=1)
+                Buffers: shared hit=4
+                ->  Index Scan using ix_address_objects_parent_id on address_objects  (cost=0.14..8.16 rows=1 width=1048) (actual time=0.001..0.001 rows=1.00 loops=1)
+                      Index Cond: (parent_id IS NULL)
+                      Index Searches: 1
+                      Buffers: shared hit=2
+                ->  Index Scan using address_types_pkey on address_types  (cost=0.14..8.16 rows=1 width=308) (actual time=0.001..0.001 rows=1.00 loops=1)
+                      Index Cond: (id = address_objects.type_id)
+                      Index Searches: 1
+                      Buffers: shared hit=2
+          ->  Nested Loop  (cost=0.47..19.99 rows=10 width=104) (never executed)
+                ->  Hash Join  (cost=0.33..11.39 rows=10 width=1112) (never executed)
+                      Hash Cond: (child_object.parent_id = parent_path.object_id)
+                      ->  Seq Scan on address_objects child_object  (cost=0.00..10.70 rows=70 width=1056) (never executed)
+                      ->  Hash  (cost=0.20..0.20 rows=10 width=72) (never executed)
+                            ->  WorkTable Scan on address_paths parent_path  (cost=0.00..0.20 rows=10 width=72) (never executed)
+                ->  Index Scan using address_types_pkey on address_types child_type  (cost=0.14..0.85 rows=1 width=308) (never executed)
+                      Index Cond: (id = child_object.type_id)
+                      Index Searches: 0
+  ->  Sort  (cost=73.68..73.68 rows=2 width=410) (actual time=0.020..0.021 rows=1.00 loops=1)
+        Sort Key: map_connections.id
+        Sort Method: quicksort  Memory: 25kB
+        Buffers: shared hit=18
+        ->  Nested Loop Left Join  (cost=25.46..73.67 rows=2 width=410) (actual time=0.018..0.020 rows=1.00 loops=1)
+              Buffers: shared hit=18
+              ->  Nested Loop Left Join  (cost=25.18..57.07 rows=2 width=435) (actual time=0.016..0.017 rows=1.00 loops=1)
+                    Buffers: shared hit=15
+                    ->  Nested Loop Left Join  (cost=24.91..40.47 rows=2 width=410) (actual time=0.015..0.016 rows=1.00 loops=1)
+                          Buffers: shared hit=12
+                          ->  Nested Loop Left Join  (cost=16.73..27.44 rows=2 width=346) (actual time=0.014..0.014 rows=1.00 loops=1)
+                                Buffers: shared hit=12
+                                ->  Bitmap Heap Scan on map_connections  (cost=8.56..14.42 rows=2 width=282) (actual time=0.008..0.009 rows=1.00 loops=1)
+                                      Recheck Cond: ((source_marker_id = 1) OR (target_marker_id = 1))
+                                      Filter: ((company_id = 1) AND (((visibility)::text = 'company'::text) OR (owner_user_id = 1)))
+                                      Heap Blocks: exact=1
+                                      Buffers: shared hit=8
+                                      ->  BitmapOr  (cost=8.56..8.56 rows=2 width=0) (actual time=0.006..0.006 rows=0.00 loops=1)
+                                            Buffers: shared hit=7
+                                            ->  Bitmap Index Scan on ix_map_connections_source_marker_id  (cost=0.00..4.28 rows=1 width=0) (actual time=0.006..0.006 rows=1.00 loops=1)
+                                                  Index Cond: (source_marker_id = 1)
+                                                  Index Searches: 1
+                                                  Buffers: shared hit=5
+                                            ->  Bitmap Index Scan on ix_map_connections_target_marker_id  (cost=0.00..4.28 rows=1 width=0) (actual time=0.000..0.000 rows=0.00 loops=1)
+                                                  Index Cond: (target_marker_id = 1)
+                                                  Index Searches: 1
+                                                  Buffers: shared hit=2
+                                ->  Hash Join  (cost=8.17..10.59 rows=1 width=72) (actual time=0.005..0.005 rows=0.00 loops=1)
+                                      Hash Cond: (address_paths_1.object_id = buildings_1.address_object_id)
+                                      Buffers: shared hit=4
+                                      ->  CTE Scan on address_paths address_paths_1  (cost=0.00..2.02 rows=101 width=40) (actual time=0.003..0.003 rows=1.00 loops=1)
+                                            Storage: Memory  Maximum Storage: 17kB
+                                            Buffers: shared hit=4
+                                      ->  Hash  (cost=8.16..8.16 rows=1 width=402) (actual time=0.000..0.001 rows=0.00 loops=1)
+                                            Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                                            ->  Index Scan using buildings_pkey on buildings buildings_1  (cost=0.14..8.16 rows=1 width=402) (actual time=0.000..0.000 rows=0.00 loops=1)
+                                                  Index Cond: (id = map_connections.target_building_id)
+                                                  Index Searches: 0
+                          ->  Hash Join  (cost=8.17..10.59 rows=1 width=72) (actual time=0.001..0.001 rows=0.00 loops=1)
+                                Hash Cond: (address_paths.object_id = buildings.address_object_id)
+                                ->  CTE Scan on address_paths  (cost=0.00..2.02 rows=101 width=40) (actual time=0.000..0.000 rows=1.00 loops=1)
+                                      Storage: Memory  Maximum Storage: 17kB
+                                ->  Hash  (cost=8.16..8.16 rows=1 width=402) (actual time=0.000..0.000 rows=0.00 loops=1)
+                                      Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                                      ->  Index Scan using buildings_pkey on buildings  (cost=0.14..8.16 rows=1 width=402) (actual time=0.000..0.000 rows=0.00 loops=1)
+                                            Index Cond: (id = map_connections.source_building_id)
+                                            Index Searches: 0
+                    ->  Index Scan using map_markers_pkey on map_markers map_markers_1  (cost=0.28..8.29 rows=1 width=33) (actual time=0.001..0.001 rows=1.00 loops=1)
+                          Index Cond: (id = map_connections.source_marker_id)
+                          Index Searches: 1
+                          Buffers: shared hit=3
+              ->  Index Scan using map_markers_pkey on map_markers map_markers_2  (cost=0.28..8.29 rows=1 width=33) (actual time=0.002..0.002 rows=1.00 loops=1)
+                    Index Cond: (id = map_connections.target_marker_id)
+                    Index Searches: 1
+                    Buffers: shared hit=3
+Planning:
+  Buffers: shared hit=22
+Planning Time: 0.419 ms
+Execution Time: 0.051 ms

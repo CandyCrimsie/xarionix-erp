@@ -18,6 +18,8 @@ from models import (
     membership_permission_overrides,
     company_invitations,
     map_markers,
+    map_connections,
+    map_style_presets,
 )
 
 __all__ = [
@@ -40,4 +42,6 @@ __all__ = [
     "membership_permission_overrides",
     "company_invitations",
     "map_markers",
+    "map_connections",
+    "map_style_presets",
 ]

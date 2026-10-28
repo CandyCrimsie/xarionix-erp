@@ -2,10 +2,12 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.permissions.codes import PermissionCode
 from core.permissions.scopes import PermissionScope
+from core.map_domain import MapOperationError
 from dependencies.authorization import require_permission
 from dependencies.company import CurrentCompanyContext
 from dependencies.database import get_session
@@ -15,6 +17,9 @@ from schemas.map import (
     MapTileSessionResponse,
 )
 from schemas.map_markers import MapMarkerCreate, MapMarkerResponse, MapMarkerUpdate
+from schemas.map_connections import MapConnectionCreate, MapConnectionUpdate, MapConnectionResponse, MapStylePresetCreate, MapStylePresetUpdate, MapStylePresetResponse
+from services import map_connections as graph
+from services.authorization import AuthorizationService
 from services.map import (
     MapAddressObjectNotFoundError,
     MapTilesNotConfiguredError,
@@ -35,7 +40,19 @@ from services.map_markers import (
 )
 
 
-router = APIRouter(prefix="/map", tags=["Map"])
+class MapRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def wrapped(request):
+            try:
+                return await handler(request)
+            except MapOperationError as exc:
+                raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+        return wrapped
+
+
+router = APIRouter(prefix="/map", tags=["Map"], route_class=MapRoute)
 
 MapReadContext = Annotated[
     CurrentCompanyContext,
@@ -56,6 +73,16 @@ MapManageContext = Annotated[
     ),
 ]
 DatabaseSession = Annotated[AsyncSession, Depends(get_session)]
+
+
+async def actor(session, context):
+    manage = await AuthorizationService(session).has_permission(
+        company_id=context.company.id,
+        company_membership_id=context.membership.id,
+        permission=PermissionCode.ADDRESSES_MANAGE,
+        minimum_scope=PermissionScope.COMPANY,
+    )
+    return {"company_id": context.company.id, "user_id": context.user.id, "can_manage": manage}
 
 
 @router.get("/session", response_model=MapTileSessionResponse)
@@ -147,7 +174,7 @@ async def list_map_markers_endpoint(
             )
     return await get_markers(
         session,
-        company_id=context.company.id,
+        **await actor(session, context),
         west=west,
         south=south,
         east=east,
@@ -162,12 +189,12 @@ async def list_map_markers_endpoint(
 )
 async def create_map_marker_endpoint(
     data: MapMarkerCreate,
-    context: MapManageContext,
+    context: MapReadContext,
     session: DatabaseSession,
 ) -> MapMarkerResponse:
     try:
         return await create_marker(
-            session, company_id=context.company.id, data=data
+            session, **await actor(session, context), data=data
         )
     except MapMarkerBuildingNotFoundError as exc:
         raise HTTPException(
@@ -184,7 +211,7 @@ async def get_map_marker_endpoint(
 ) -> MapMarkerResponse:
     try:
         return await get_marker(
-            session, company_id=context.company.id, marker_id=marker_id
+            session, **await actor(session, context), marker_id=marker_id
         )
     except MapMarkerNotFoundError as exc:
         raise HTTPException(
@@ -197,13 +224,13 @@ async def get_map_marker_endpoint(
 async def update_map_marker_endpoint(
     marker_id: int,
     data: MapMarkerUpdate,
-    context: MapManageContext,
+    context: MapReadContext,
     session: DatabaseSession,
 ) -> MapMarkerResponse:
     try:
         return await update_marker(
             session,
-            company_id=context.company.id,
+            **await actor(session, context),
             marker_id=marker_id,
             data=data,
         )
@@ -227,12 +254,12 @@ async def update_map_marker_endpoint(
 @router.delete("/markers/{marker_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_map_marker_endpoint(
     marker_id: int,
-    context: MapManageContext,
+    context: MapReadContext,
     session: DatabaseSession,
 ) -> Response:
     try:
         await delete_marker(
-            session, company_id=context.company.id, marker_id=marker_id
+            session, **await actor(session, context), marker_id=marker_id
         )
     except MapMarkerNotFoundError as exc:
         raise HTTPException(
@@ -240,3 +267,83 @@ async def delete_map_marker_endpoint(
             detail="Map marker not found",
         ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/endpoints")
+async def search_map_endpoints(context: MapReadContext, session: DatabaseSession,
+    q: Annotated[str, Query(max_length=200)] = "", limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0, le=10000)] = 0):
+    return await graph.search_endpoints(session, company_id=context.company.id, user_id=context.user.id, query=q, limit=limit, offset=offset)
+
+
+@router.get("/buildings/{building_id}/marker", response_model=MapMarkerResponse | None)
+async def building_marker(building_id: int, context: MapReadContext, session: DatabaseSession):
+    from sqlalchemy import select
+    from models.map_markers import MapMarker
+    marker_id = await session.scalar(select(MapMarker.id).where(MapMarker.company_id == context.company.id, MapMarker.building_id == building_id, MapMarker.building_link_role == "represents"))
+    return await get_marker(session, **await actor(session, context), marker_id=marker_id) if marker_id else None
+
+
+@router.get("/connections", response_model=list[MapConnectionResponse])
+async def list_connections(context: MapReadContext, session: DatabaseSession,
+    west: Annotated[Decimal | None, Query(ge=-180, le=180)] = None,
+    south: Annotated[Decimal | None, Query(ge=-90, le=90)] = None,
+    east: Annotated[Decimal | None, Query(ge=-180, le=180)] = None,
+    north: Annotated[Decimal | None, Query(ge=-90, le=90)] = None,
+    endpoint_kind: Annotated[str | None, Query(pattern="^(building|marker)$")] = None,
+    endpoint_id: Annotated[int | None, Query(gt=0)] = None):
+    bounds = None
+    if any(value is not None for value in (west, south, east, north)):
+        if any(value is None for value in (west, south, east, north)) or west >= east or south >= north:
+            raise HTTPException(status_code=422, detail="All valid viewport bounds must be supplied together")
+        bounds = {"west": west, "south": south, "east": east, "north": north}
+    if (endpoint_kind is None) != (endpoint_id is None):
+        raise HTTPException(status_code=422, detail="Endpoint kind and ID are required together")
+    return await graph.get_connections(session, **await actor(session, context), bounds=bounds, endpoint_kind=endpoint_kind, endpoint_id=endpoint_id)
+
+
+@router.post("/connections", response_model=MapConnectionResponse, status_code=201)
+async def create_connection(data: MapConnectionCreate, context: MapReadContext, session: DatabaseSession):
+    return await graph.save_connection(session, **await actor(session, context), data=data)
+
+
+@router.get("/connections/{connection_id}", response_model=MapConnectionResponse)
+async def connection_detail(connection_id: int, context: MapReadContext, session: DatabaseSession):
+    return await graph.get_connection(session, **await actor(session, context), connection_id=connection_id)
+
+
+@router.patch("/connections/{connection_id}", response_model=MapConnectionResponse)
+async def change_connection(connection_id: int, data: MapConnectionUpdate, context: MapReadContext, session: DatabaseSession):
+    return await graph.save_connection(session, **await actor(session, context), data=data, connection_id=connection_id)
+
+
+@router.delete("/connections/{connection_id}", status_code=204)
+async def remove_connection(connection_id: int, context: MapReadContext, session: DatabaseSession):
+    await graph.delete_connection(session, **await actor(session, context), connection_id=connection_id)
+    return Response(status_code=204)
+
+
+@router.get("/marker-styles", response_model=list[MapStylePresetResponse])
+async def list_marker_styles(context: MapReadContext, session: DatabaseSession):
+    return await graph.list_presets(session, company_id=context.company.id, user_id=context.user.id)
+
+
+@router.post("/marker-styles", response_model=MapStylePresetResponse, status_code=201)
+async def create_marker_style(data: MapStylePresetCreate, context: MapReadContext, session: DatabaseSession):
+    return await graph.save_preset(session, company_id=context.company.id, user_id=context.user.id, data=data)
+
+
+@router.get("/marker-styles/{preset_id}", response_model=MapStylePresetResponse)
+async def marker_style_detail(preset_id: int, context: MapReadContext, session: DatabaseSession):
+    return await graph.get_preset(session, company_id=context.company.id, user_id=context.user.id, preset_id=preset_id)
+
+
+@router.patch("/marker-styles/{preset_id}", response_model=MapStylePresetResponse)
+async def change_marker_style(preset_id: int, data: MapStylePresetUpdate, context: MapReadContext, session: DatabaseSession):
+    return await graph.save_preset(session, company_id=context.company.id, user_id=context.user.id, data=data, preset_id=preset_id)
+
+
+@router.delete("/marker-styles/{preset_id}", status_code=204)
+async def remove_marker_style(preset_id: int, context: MapReadContext, session: DatabaseSession):
+    await graph.delete_preset(session, company_id=context.company.id, user_id=context.user.id, preset_id=preset_id)
+    return Response(status_code=204)
