@@ -51,6 +51,7 @@ from services.address_types import (
     update_address_type,
 )
 from services.addresses import (
+    AddressDependenciesError,
     AddressObjectNotEmptyError,
     AddressObjectNotFoundError,
     AddressTypeNotFoundError,
@@ -112,6 +113,8 @@ DatabaseSession = Annotated[AsyncSession, Depends(get_session)]
 
 
 def _raise_address_error(exc: Exception) -> None:
+    if isinstance(exc, AddressDependenciesError) and exc.detail:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail)
     if isinstance(
         exc,
         (
@@ -354,7 +357,7 @@ async def delete_address_object_endpoint(
     _context: AddressManageContext,
 ) -> Response:
     try:
-        await delete_address_object(session, address_object_id)
+        await delete_address_object(session, address_object_id, company_id=_context.company.id, user_id=_context.user.id)
     except (AddressObjectNotFoundError, AddressObjectNotEmptyError) as exc:
         _raise_address_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -437,7 +440,7 @@ async def delete_building_endpoint(
     _context: AddressManageContext,
 ) -> Response:
     try:
-        await delete_building(session, building_id)
+        await delete_building(session, building_id, company_id=_context.company.id, user_id=_context.user.id)
     except (BuildingNotFoundError, BuildingNotEmptyError) as exc:
         _raise_address_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -498,7 +501,7 @@ async def delete_entrance_endpoint(
     _context: AddressManageContext,
 ) -> Response:
     try:
-        await delete_entrance(session, entrance_id)
+        await delete_entrance(session, entrance_id, company_id=_context.company.id, user_id=_context.user.id)
     except (EntranceNotFoundError, EntranceNotEmptyError) as exc:
         _raise_address_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -584,6 +587,7 @@ async def delete_location_endpoint(
             session,
             company_id=context.company.id,
             location_id=location_id,
+            user_id=context.user.id,
         )
     except (LocationNotFoundError, LocationNotEmptyError) as exc:
         _raise_address_error(exc)

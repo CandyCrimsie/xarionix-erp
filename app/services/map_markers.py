@@ -12,7 +12,7 @@ from models.map_connections import MapConnection
 from models.map_markers import MapMarker
 from repositories.addresses import get_building_record
 from repositories.map_markers import get_map_marker, list_map_markers, marker_records_query
-from schemas.map_markers import MapMarkerCreate, MapMarkerResponse, MapMarkerUpdate
+from schemas.map_markers import MapMarkerCreate, MapMarkerResponse, MapMarkerUpdate, MarkerBindingEffect
 from services.building_coordinates import lock_buildings, set_building_position
 from services.map_route_objects import guard_endpoint_position, marker_attachments
 
@@ -88,6 +88,7 @@ async def _binding_snapshot(session, *, marker, target, occupant, values):
 
 async def _save_marker(session: AsyncSession, *, company_id, user_id, can_manage, data, marker_id=None):
     try:
+        binding_effects = []
         await lock_map_company(session, company_id)
         marker = await get_map_marker(session, company_id=company_id, marker_id=marker_id, user_id=user_id) if marker_id else None
         if marker_id and marker is None:
@@ -158,6 +159,9 @@ async def _save_marker(session: AsyncSession, *, company_id, user_id, can_manage
                 occupant.latitude, occupant.longitude = building.latitude, building.longitude
                 occupant.building_link_role = "reference"
                 occupant.version += 1
+                binding_effects.append(MarkerBindingEffect(id=occupant.id, building_id=occupant.building_id,
+                    building_link_role=occupant.building_link_role, latitude=occupant.latitude,
+                    longitude=occupant.longitude, version=occupant.version))
                 await session.flush()
             if values.get("building_position"):
                 await set_building_position(session, building, **values["building_position"])
@@ -184,7 +188,9 @@ async def _save_marker(session: AsyncSession, *, company_id, user_id, can_manage
         await session.flush()
         saved_id = marker.id
         await session.commit()
-        return await get_marker(session, company_id=company_id, marker_id=saved_id, user_id=user_id, can_manage=can_manage)
+        result = await get_marker(session, company_id=company_id, marker_id=saved_id, user_id=user_id, can_manage=can_manage)
+        result.binding_effects = binding_effects
+        return result
     except IntegrityError as exc:
         await session.rollback()
         raise MapOperationError("building_binding_conflict", "Привязка изменилась. Повторите сохранение и подтвердите актуальные связи.") from exc

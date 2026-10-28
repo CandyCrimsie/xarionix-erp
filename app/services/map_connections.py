@@ -139,7 +139,10 @@ async def _endpoint(session, endpoint, *, company_id, user_id, visibility):
     if visibility == "company" and marker.visibility != "company":
         raise MapOperationError("private_endpoint", "Общее соединение не может ссылаться на личную отметку.", status=422)
     if marker.building_link_role == "represents":
-        return "building", await session.get(Building, marker.building_id)
+        building = await session.get(Building, marker.building_id)
+        if building is None:
+            raise MapOperationError("endpoint_not_found", "Дом уже удалён. Обновите данные.", status=404)
+        return "building", building
     return "marker", marker
 
 
@@ -160,9 +163,16 @@ async def save_connection(session, *, company_id, user_id, can_manage, data, con
         # requires manage and revalidates every endpoint in the new visibility.
         source_kind, source = await _endpoint(session, data.source, company_id=company_id, user_id=user_id, visibility=data.visibility)
         target_kind, target = await _endpoint(session, data.target, company_id=company_id, user_id=user_id, visibility=data.visibility)
-        await lock_buildings(session, {e.id for kind, e in ((source_kind, source), (target_kind, target)) if kind == "building"})
-        for kind, endpoint in ((source_kind, source), (target_kind, target)):
-            await session.refresh(endpoint, with_for_update=True)
+        buildings = await lock_buildings(session, {e.id for kind, e in ((source_kind, source), (target_kind, target)) if kind == "building"})
+        marker_ids = {e.id for kind, e in ((source_kind, source), (target_kind, target)) if kind == "marker"}
+        markers = {m.id: m for m in (await session.scalars(select(MapMarker).where(MapMarker.id.in_(marker_ids))
+            .order_by(MapMarker.id).with_for_update().execution_options(populate_existing=True))).all()} if marker_ids else {}
+        source = (buildings if source_kind == "building" else markers).get(source.id)
+        target = (buildings if target_kind == "building" else markers).get(target.id)
+        if source is None or target is None:
+            # A deletion can win after _endpoint's read and before its row
+            # lock. refresh(a deleted identity) would incorrectly become 500.
+            raise MapOperationError("endpoint_not_found", "Конец соединения уже удалён. Обновите данные.", status=404)
         if source_kind == target_kind and source.id == target.id:
             raise MapOperationError("same_endpoint", "Выберите два разных объекта.", status=422)
         if any(e.latitude is None or e.longitude is None for e in (source, target)):

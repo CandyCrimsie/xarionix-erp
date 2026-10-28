@@ -135,6 +135,15 @@ class MapMarkerUpdate(BaseModel):
         return self
 
 
+class MarkerBindingEffect(BaseModel):
+    id: int
+    building_id: int | None
+    building_link_role: BuildingLinkRole
+    latitude: float | None
+    longitude: float | None
+    version: int
+
+
 class MapMarkerResponse(MapMarkerAppearance):
     model_config = ConfigDict(from_attributes=True, extra="ignore", allow_inf_nan=False)
     id: int
@@ -153,5 +162,6 @@ class MapMarkerResponse(MapMarkerAppearance):
     version: int
     can_manage: bool = False
     route_attachment: dict | None = None
+    binding_effects: list[MarkerBindingEffect] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

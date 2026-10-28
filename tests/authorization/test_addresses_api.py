@@ -1101,7 +1101,7 @@ async def test_delete_endpoints_map_concurrent_fk_conflicts_to_http_409(
         headers=headers,
     )
     assert address_delete.status_code == 409
-    assert address_delete.json()["detail"] == "Address record has dependent data"
+    assert address_delete.json()["detail"]["code"] == "object_has_dependencies"
 
     async def add_entrance_after_check(
         session: AsyncSession,
@@ -1127,7 +1127,7 @@ async def test_delete_endpoints_map_concurrent_fk_conflicts_to_http_409(
         headers=headers,
     )
     assert building_delete.status_code == 409
-    assert building_delete.json()["detail"] == "Address record has dependent data"
+    assert building_delete.json()["detail"]["code"] == "object_has_dependencies"
 
     async def add_location_after_check(
         session: AsyncSession,
@@ -1157,7 +1157,7 @@ async def test_delete_endpoints_map_concurrent_fk_conflicts_to_http_409(
         headers=headers,
     )
     assert entrance_delete.status_code == 409
-    assert entrance_delete.json()["detail"] == "Address record has dependent data"
+    assert entrance_delete.json()["detail"]["code"] == "object_has_dependencies"
 
     async def add_equipment_after_check(
         session: AsyncSession,
@@ -1177,7 +1177,7 @@ async def test_delete_endpoints_map_concurrent_fk_conflicts_to_http_409(
         headers=headers,
     )
     assert location_delete.status_code == 409
-    assert location_delete.json()["detail"] == "Address record has dependent data"
+    assert location_delete.json()["detail"]["code"] == "object_has_dependencies"
 
 
 @pytest.mark.asyncio

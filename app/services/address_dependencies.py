@@ -1,0 +1,72 @@
+"""Deletion blockers, scoped for disclosure independently of FK protection.
+
+Address/building rows are shared. Locations and graph objects are not: the
+existence of an inaccessible blocker is disclosed, never its count or identity.
+Call while holding the deleted row's FOR UPDATE lock; FK remains the last guard.
+"""
+from sqlalchemy import func, or_, select
+
+from core.map_domain import visible_to
+from models.address_objects import AddressObject
+from models.buildings import Building
+from models.entrances import Entrance
+from models.locations import Location
+from models.equipment import Equipment
+from models.map_connections import MapConnection
+
+TITLES = {"address_object": "Невозможно удалить адресный объект", "building": "Невозможно удалить дом",
+    "entrance": "Невозможно удалить подъезд", "location": "Невозможно удалить место размещения"}
+
+
+async def deletion_dependencies(session, kind, object_id, *, company_id=None, user_id=None):
+    groups = []
+    restricted = False
+
+    async def count(model, *where):
+        return await session.scalar(select(func.count()).select_from(model).where(*where))
+
+    async def shared(model, type_, *where):
+        value = await count(model, *where)
+        if value:
+            groups.append({"type": type_, "count": value})
+
+    async def locations(*where):
+        nonlocal restricted
+        total = await count(Location, *where)
+        visible = await count(Location, *where, Location.company_id == company_id)
+        if visible:
+            groups.append({"type": "location", "count": visible})
+        restricted |= total > visible
+
+    if kind == "address_object":
+        await shared(AddressObject, "address_object", AddressObject.parent_id == object_id)
+        await shared(Building, "building", Building.address_object_id == object_id)
+    elif kind == "building":
+        await shared(Entrance, "entrance", Entrance.building_id == object_id)
+        await locations(Location.building_id == object_id)
+        ends = or_(MapConnection.source_building_id == object_id, MapConnection.target_building_id == object_id)
+        visible_filter = visible_to(MapConnection, company_id, user_id)
+        total = await count(MapConnection, ends)
+        visible = await count(MapConnection, ends, *visible_filter)
+        restricted |= total > visible
+        if visible:
+            # Reuse the canonical endpoint names (building address / marker
+            # name). Never query another user's private endpoints for display.
+            from services.map_connections import connection_query
+            rows = (await session.execute(connection_query().where(ends, *visible_filter)
+                .order_by(MapConnection.id).limit(30))).all()
+            groups.append({"type": "map_connection", "count": visible, "has_more": visible > len(rows),
+                "items": [{"id": row[0].id, "name": row[0].name, "medium": row[0].medium,
+                    "source_name": row[-2], "target_name": row[-1]} for row in rows]})
+    elif kind == "entrance":
+        await locations(Location.entrance_id == object_id)
+    elif kind == "location":
+        await shared(Equipment, "equipment", Equipment.location_id == object_id)
+    if restricted:
+        groups.append({"type": "restricted", "message": "Есть связанные записи, недоступные в текущем контексте. Обратитесь к ответственному за эти объекты."})
+    if not groups:
+        # A raced FK violation can roll back a newly inserted dependent row.
+        # Don't invent an item/count or claim it is somebody's private record.
+        groups.append({"type": "integrity", "message": "Удаление заблокировано ограничением целостности. Обновите данные и повторите проверку."})
+    return {"code": "object_has_dependencies", "message": TITLES[kind],
+        "object": {"kind": kind, "id": object_id}, "dependencies": groups}

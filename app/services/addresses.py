@@ -1,4 +1,5 @@
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.address_normalization import normalize_address_value
@@ -48,6 +49,13 @@ from services.address_hierarchy import (
     validate_building_parent,
 )
 from services.building_coordinates import lock_building, synchronize_building_markers
+from services.address_dependencies import deletion_dependencies
+
+
+class AddressDependenciesError(Exception):
+    def __init__(self, detail=None):
+        self.detail = detail
+        super().__init__(detail["message"] if detail else "Address record has dependent data")
 
 
 class AddressObjectNotFoundError(Exception):
@@ -62,7 +70,7 @@ class DuplicateAddressObjectError(Exception):
     pass
 
 
-class AddressObjectNotEmptyError(Exception):
+class AddressObjectNotEmptyError(AddressDependenciesError):
     pass
 
 
@@ -74,7 +82,7 @@ class DuplicateBuildingError(Exception):
     pass
 
 
-class BuildingNotEmptyError(Exception):
+class BuildingNotEmptyError(AddressDependenciesError):
     pass
 
 
@@ -86,7 +94,7 @@ class DuplicateEntranceError(Exception):
     pass
 
 
-class EntranceNotEmptyError(Exception):
+class EntranceNotEmptyError(AddressDependenciesError):
     pass
 
 
@@ -98,7 +106,7 @@ class LocationEntranceMismatchError(Exception):
     pass
 
 
-class LocationNotEmptyError(Exception):
+class LocationNotEmptyError(AddressDependenciesError):
     pass
 
 
@@ -124,13 +132,14 @@ async def _commit_delete(
     session: AsyncSession,
     *,
     dependent_error: type[Exception],
+    detail_factory=None,
 ) -> None:
     try:
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
         if _is_dependent_data_violation(exc):
-            raise dependent_error from exc
+            raise dependent_error(await detail_factory() if detail_factory else None) from exc
         raise
 
 
@@ -294,16 +303,19 @@ async def update_address_object(
 async def delete_address_object(
     session: AsyncSession,
     address_object_id: int,
+    *, company_id=None, user_id=None,
 ) -> None:
+    await session.execute(select(AddressObject).where(AddressObject.id == address_object_id).with_for_update())
     record = await get_address_object_record(session, address_object_id)
     if record is None:
         raise AddressObjectNotFoundError
     if await address_object_has_children_or_buildings(session, address_object_id):
-        raise AddressObjectNotEmptyError
+        raise AddressObjectNotEmptyError(await deletion_dependencies(session, "address_object", address_object_id, company_id=company_id, user_id=user_id))
     await session.delete(record.address_object)
     await _commit_delete(
         session,
         dependent_error=AddressObjectNotEmptyError,
+        detail_factory=lambda: deletion_dependencies(session, "address_object", address_object_id, company_id=company_id, user_id=user_id),
     )
 
 
@@ -409,19 +421,21 @@ async def update_building(
 async def delete_building(
     session: AsyncSession,
     building_id: int,
+    *, company_id=None, user_id=None,
 ) -> None:
     building = await lock_building(session, building_id)
     if building is None:
         raise BuildingNotFoundError
     if await building_has_entrances_or_locations(session, building_id):
-        raise BuildingNotEmptyError
+        raise BuildingNotEmptyError(await deletion_dependencies(session, "building", building_id, company_id=company_id, user_id=user_id))
     from services.building_coordinates import detach_deleted_building
     if not await detach_deleted_building(session, building):
-        raise BuildingNotEmptyError
+        raise BuildingNotEmptyError(await deletion_dependencies(session, "building", building_id, company_id=company_id, user_id=user_id))
     await session.delete(building)
     await _commit_delete(
         session,
         dependent_error=BuildingNotEmptyError,
+        detail_factory=lambda: deletion_dependencies(session, "building", building_id, company_id=company_id, user_id=user_id),
     )
 
 
@@ -478,16 +492,19 @@ async def update_entrance(
 async def delete_entrance(
     session: AsyncSession,
     entrance_id: int,
+    *, company_id=None, user_id=None,
 ) -> None:
+    await session.execute(select(Entrance).where(Entrance.id == entrance_id).with_for_update())
     entrance = await get_entrance(session, entrance_id)
     if entrance is None:
         raise EntranceNotFoundError
     if await entrance_has_locations(session, entrance_id):
-        raise EntranceNotEmptyError
+        raise EntranceNotEmptyError(await deletion_dependencies(session, "entrance", entrance_id, company_id=company_id, user_id=user_id))
     await session.delete(entrance)
     await _commit_delete(
         session,
         dependent_error=EntranceNotEmptyError,
+        detail_factory=lambda: deletion_dependencies(session, "entrance", entrance_id, company_id=company_id, user_id=user_id),
     )
 
 
@@ -575,7 +592,9 @@ async def delete_location(
     *,
     company_id: int,
     location_id: int,
+    user_id=None,
 ) -> None:
+    await session.execute(select(Location).where(Location.id == location_id, Location.company_id == company_id).with_for_update())
     location = await get_location(
         session,
         company_id=company_id,
@@ -584,11 +603,12 @@ async def delete_location(
     if location is None:
         raise LocationNotFoundError
     if await location_has_equipment(session, location_id):
-        raise LocationNotEmptyError
+        raise LocationNotEmptyError(await deletion_dependencies(session, "location", location_id, company_id=company_id, user_id=user_id))
     await session.delete(location)
     await _commit_delete(
         session,
         dependent_error=LocationNotEmptyError,
+        detail_factory=lambda: deletion_dependencies(session, "location", location_id, company_id=company_id, user_id=user_id),
     )
 
 
