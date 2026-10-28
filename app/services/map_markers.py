@@ -14,6 +14,7 @@ from repositories.addresses import get_building_record
 from repositories.map_markers import get_map_marker, list_map_markers, marker_records_query
 from schemas.map_markers import MapMarkerCreate, MapMarkerResponse, MapMarkerUpdate
 from services.building_coordinates import lock_buildings, set_building_position
+from services.map_route_objects import guard_endpoint_position, marker_attachments
 
 
 class MapMarkerNotFoundError(Exception):
@@ -43,7 +44,11 @@ async def get_markers(session, *, company_id, user_id, can_manage=False, **bound
     rows = await list_map_markers(session, company_id=company_id, user_id=user_id, **bounds)
     if len(rows) > 5000:
         raise MapOperationError("viewport_too_large", "Слишком много меток. Увеличьте масштаб.", status=422)
-    return [marker_response(row, user_id=user_id, can_manage=can_manage) for row in rows]
+    result = [marker_response(row, user_id=user_id, can_manage=can_manage) for row in rows]
+    links = await marker_attachments(session, [marker.id for marker in result])
+    for marker in result:
+        marker.route_attachment = links.get(marker.id)
+    return result
 
 
 async def get_marker(session, *, company_id, marker_id, user_id, can_manage=False):
@@ -52,7 +57,9 @@ async def get_marker(session, *, company_id, marker_id, user_id, can_manage=Fals
     ).execution_options(populate_existing=True))).one_or_none()
     if row is None:
         raise MapMarkerNotFoundError
-    return marker_response(row, user_id=user_id, can_manage=can_manage)
+    result = marker_response(row, user_id=user_id, can_manage=can_manage)
+    result.route_attachment = (await marker_attachments(session, [result.id])).get(result.id)
+    return result
 
 
 def _position(building):
@@ -111,6 +118,19 @@ async def _save_marker(session: AsyncSession, *, company_id, user_id, can_manage
             raise MapMarkerBuildingNotFoundError
         if marker:
             await session.refresh(marker, with_for_update=True)
+            link_info = (await marker_attachments(session, [marker.id])).get(marker.id)
+            fixed_fields = {"latitude", "longitude", "point_type", "visibility", "building_id", "building_link_role"}
+            def changed_fixed_field(key):
+                if key not in changes:
+                    return False
+                value, previous = changes[key], getattr(marker, key)
+                if key in {"latitude", "longitude"} and value is not None and previous is not None:
+                    return round(float(value), 7) != round(float(previous), 7)
+                return value != previous
+            if link_info and any(changed_fixed_field(key) for key in fixed_fields):
+                raise MapOperationError("marker_is_route_object", "Объект закреплён на трассе. Сначала явно отвяжите его, чтобы изменить положение или тип.")
+            if {"latitude", "longitude"} & changes.keys():
+                await guard_endpoint_position(session, "marker", marker.id, values.get("latitude"), values.get("longitude"))
         if marker and marker.visibility != visibility:
             dependent = await session.scalar(select(MapConnection.id).where(or_(
                 MapConnection.source_marker_id == marker.id, MapConnection.target_marker_id == marker.id

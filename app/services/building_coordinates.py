@@ -37,6 +37,8 @@ async def synchronize_building_markers(
 
 
 async def set_building_position(session, building, *, latitude, longitude):
+    from services.map_route_objects import guard_endpoint_position
+    await guard_endpoint_position(session, "building", building.id, latitude, longitude)
     building.latitude = latitude if longitude is not None else None
     building.longitude = longitude if latitude is not None else None
     await session.flush()

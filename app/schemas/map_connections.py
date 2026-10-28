@@ -19,6 +19,7 @@ class MarkerEndpoint(BaseModel):
 
 
 MapEndpoint = Annotated[BuildingEndpoint | MarkerEndpoint, Field(discriminator="kind")]
+InstallationMethod = Literal["unknown", "aerial", "duct", "direct_buried", "facade", "indoor"]
 
 
 class MapConnectionCreate(BaseModel):
@@ -33,6 +34,7 @@ class MapConnectionCreate(BaseModel):
     fiber_count: int | None = Field(default=None, gt=0, le=10000, strict=True)
     category: Literal["Cat 5e", "Cat 6", "Cat 6A"] | None = None
     vertices: list[tuple[float, float]] = Field(default_factory=list, max_length=498)
+    installation_methods: list[InstallationMethod] | None = Field(default=None, max_length=499)
 
     @field_validator("name", "description")
     @classmethod
@@ -54,6 +56,8 @@ class MapConnectionCreate(BaseModel):
             raise ValueError("Connection endpoints must be different")
         if (self.medium == "fiber" and self.category is not None) or (self.medium == "utp" and self.fiber_count is not None):
             raise ValueError("Cable parameters do not match medium")
+        if self.installation_methods is not None and len(self.installation_methods) != len(self.vertices) + 1:
+            raise ValueError("One installation method is required for each geometry segment")
         return self
 
 
@@ -62,9 +66,10 @@ class MapConnectionUpdate(MapConnectionCreate):
     expected_version: int = Field(gt=0)
 
 
-class SplitSpliceMarker(MapMarkerAppearance):
+class RouteNodeMarker(MapMarkerAppearance):
     """Only descriptive/visual fields; topology and ownership are server-owned."""
     icon_name: str | None = "splice"
+    point_type: Literal["splice", "fiber_box", "odf", "network_node", "cabinet"] = "splice"
     name: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
 
@@ -74,14 +79,38 @@ class SplitSpliceMarker(MapMarkerAppearance):
         return _clean_text(value, allow_empty=info.field_name != "name") if value is not None else None
 
 
-class MapConnectionSplit(BaseModel):
+class RoutePointRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     expected_version: int = Field(gt=0, strict=True)
     expected_geometry_token: str = Field(pattern=r"^[0-9a-f]{64}$")
     segment_index: int = Field(ge=0, le=498, strict=True)
     fraction: float = Field(ge=0, le=1)
     position: BuildingPosition
-    marker: SplitSpliceMarker
+
+
+class MapConnectionSplit(RoutePointRequest):
+    marker: RouteNodeMarker
+
+
+class RoutePassThroughMarker(RouteNodeMarker):
+    point_type: Literal["chamber", "pole", "transition", "fiber_box", "network_node", "cabinet"]
+    icon_name: str | None = "chamber"
+
+
+class MapConnectionPlace(RoutePointRequest):
+    marker: RoutePassThroughMarker
+    installation_after: InstallationMethod | None = None
+
+
+class MapInstallationBoundary(RoutePointRequest):
+    installation_after: InstallationMethod
+    until: Literal["end", "next_vertex"] = "end"
+
+
+class MapRouteObjectDetach(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(gt=0, strict=True)
+    expected_geometry_token: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class EndpointResponse(BaseModel):
@@ -112,6 +141,8 @@ class MapConnectionResponse(BaseModel):
     can_manage: bool
     version: int
     geometry_token: str
+    installation_methods: list[InstallationMethod]
+    route_objects: list[dict] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -119,6 +150,11 @@ class MapConnectionResponse(BaseModel):
 class MapConnectionSplitResponse(BaseModel):
     marker: MapMarkerResponse
     connections: tuple[MapConnectionResponse, MapConnectionResponse]
+
+
+class MapRouteObjectResponse(BaseModel):
+    marker: MapMarkerResponse
+    connection: MapConnectionResponse
 
 
 class MapStylePresetCreate(BaseModel):

@@ -9,7 +9,7 @@ HEX_COLOR_PATTERN = r"^#[0-9A-Fa-f]{6}$"
 MapMarkerSize = Literal["small", "normal", "large"]
 MapMarkerShape = Literal["circle", "rounded", "pill", "icon"]
 Visibility = Literal["company", "private"]
-PointType = Literal["building", "network_node", "cabinet", "splice", "pole", "chamber", "equipment", "note"]
+PointType = Literal["building", "network_node", "cabinet", "splice", "pole", "chamber", "equipment", "note", "fiber_box", "odf", "transition"]
 BuildingLinkRole = Literal["none", "represents", "located_at", "reference"]
 
 
@@ -152,5 +152,6 @@ class MapMarkerResponse(MapMarkerAppearance):
     description: str | None
     version: int
     can_manage: bool = False
+    route_attachment: dict | None = None
     created_at: datetime
     updated_at: datetime

@@ -54,6 +54,10 @@ async def initialize_database() -> None:
         report = await upgrade_map_schema(connection)
         if report["upgrade_required"]:
             print("Map schema upgrade:", report)
+        from database.map_routes_upgrade import upgrade_route_schema
+        route_report = await upgrade_route_schema(connection)
+        if route_report["upgrade_required"]:
+            print("Route schema upgrade:", route_report)
         await connection.run_sync(Base.metadata.create_all)
 
 

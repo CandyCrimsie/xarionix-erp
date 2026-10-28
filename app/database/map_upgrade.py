@@ -70,6 +70,8 @@ async def run(apply):
     async with engine.begin() as connection:
         report = await (upgrade_map_schema(connection) if apply else inspect_legacy_markers(connection))
         if apply:
+            from database.map_routes_upgrade import upgrade_route_schema
+            await upgrade_route_schema(connection)
             await connection.run_sync(Base.metadata.create_all)
         print(json.dumps(report, ensure_ascii=False, default=str, indent=2))
     await engine.dispose()

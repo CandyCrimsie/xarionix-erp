@@ -19,6 +19,7 @@ from models import (
     company_invitations,
     map_markers,
     map_connections,
+    map_route_objects,
     map_style_presets,
 )
 
@@ -43,5 +44,6 @@ __all__ = [
     "company_invitations",
     "map_markers",
     "map_connections",
+    "map_route_objects",
     "map_style_presets",
 ]

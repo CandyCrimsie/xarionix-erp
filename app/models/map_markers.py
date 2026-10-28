@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
+from core.map_markers import POINT_TYPE_CHECK
 
 
 class MapMarker(Base):
@@ -52,7 +53,7 @@ class MapMarker(Base):
         CheckConstraint("building_link_role IN ('none', 'reference', 'located_at', 'represents') AND ((building_link_role = 'none' AND building_id IS NULL) OR (building_link_role <> 'none' AND building_id IS NOT NULL))", name="ck_map_markers_building_link"),
         CheckConstraint("building_link_role <> 'represents' OR (visibility = 'company' AND point_type = 'building' AND latitude IS NULL AND longitude IS NULL)", name="ck_map_markers_represents"),
         CheckConstraint("(latitude IS NULL) = (longitude IS NULL)", name="ck_map_markers_coordinate_pair"),
-        CheckConstraint("point_type IN ('building', 'network_node', 'cabinet', 'splice', 'pole', 'chamber', 'equipment', 'note')", name="ck_map_markers_point_type"),
+        CheckConstraint(POINT_TYPE_CHECK, name="ck_map_markers_point_type"),
         Index("uq_map_markers_represents", "company_id", "building_id", unique=True, postgresql_where=text("building_link_role = 'represents'")),
         Index("ix_map_markers_visibility_owner", "company_id", "visibility", "owner_user_id", "id"),
     )

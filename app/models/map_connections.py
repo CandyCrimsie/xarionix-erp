@@ -1,10 +1,11 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
+from core.map_routes import INSTALLATION_CHECK
 
 
 class MapConnection(Base):
@@ -19,6 +20,8 @@ class MapConnection(Base):
         ForeignKeyConstraint(["company_id", "source_marker_id"], ["map_markers.company_id", "map_markers.id"], ondelete="RESTRICT", name="fk_map_connections_source_marker"),
         ForeignKeyConstraint(["company_id", "target_marker_id"], ["map_markers.company_id", "map_markers.id"], ondelete="RESTRICT", name="fk_map_connections_target_marker"),
         Index("ix_map_connections_context", "company_id", "visibility", "owner_user_id", "id"),
+        UniqueConstraint("company_id", "id", name="uq_map_connections_company_id"),
+        CheckConstraint(INSTALLATION_CHECK, name="ck_map_connections_installation"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     company_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
@@ -35,6 +38,7 @@ class MapConnection(Base):
     fiber_count: Mapped[int | None] = mapped_column(Integer)
     category: Mapped[str | None] = mapped_column(String(16))
     vertices: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    installation_methods: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

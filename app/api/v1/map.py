@@ -20,6 +20,7 @@ from schemas.map_markers import MapMarkerCreate, MapMarkerResponse, MapMarkerUpd
 from schemas.map_connections import MapConnectionCreate, MapConnectionUpdate, MapConnectionResponse, MapStylePresetCreate, MapStylePresetUpdate, MapStylePresetResponse
 from services import map_connections as graph
 from schemas.map_connections import MapConnectionSplit, MapConnectionSplitResponse
+from schemas.map_connections import MapConnectionPlace, MapRouteObjectResponse, MapInstallationBoundary, MapRouteObjectDetach
 from services.authorization import AuthorizationService
 from services.map import (
     MapAddressObjectNotFoundError,
@@ -321,6 +322,21 @@ async def change_connection(connection_id: int, data: MapConnectionUpdate, conte
 @router.post("/connections/{connection_id}/split", response_model=MapConnectionSplitResponse, status_code=201)
 async def split_connection(connection_id: int, data: MapConnectionSplit, context: MapReadContext, session: DatabaseSession):
     return await graph.split_connection(session, **await actor(session, context), data=data, connection_id=connection_id)
+
+
+@router.post("/connections/{connection_id}/route-objects", response_model=MapRouteObjectResponse, status_code=201)
+async def place_route_object(connection_id: int, data: MapConnectionPlace, context: MapReadContext, session: DatabaseSession):
+    return await graph.place_route_object(session, **await actor(session, context), data=data, connection_id=connection_id)
+
+
+@router.post("/connections/{connection_id}/installation-boundaries", response_model=MapConnectionResponse)
+async def installation_boundary(connection_id: int, data: MapInstallationBoundary, context: MapReadContext, session: DatabaseSession):
+    return await graph.set_installation_boundary(session, **await actor(session, context), data=data, connection_id=connection_id)
+
+
+@router.post("/connections/{connection_id}/route-objects/{marker_id}/detach", response_model=MapRouteObjectResponse)
+async def detach_route_object(connection_id: int, marker_id: int, data: MapRouteObjectDetach, context: MapReadContext, session: DatabaseSession):
+    return await graph.detach_route_object(session, **await actor(session, context), data=data, connection_id=connection_id, marker_id=marker_id)
 
 
 @router.delete("/connections/{connection_id}", status_code=204)
