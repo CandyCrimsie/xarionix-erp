@@ -350,6 +350,7 @@ async def list_building_records_in_bounds(
     east: Decimal,
     north: Decimal,
     limit: int,
+    predicates=(),
 ) -> list[BuildingRecord]:
     """Return at most ``limit`` geocoded buildings in a viewport.
 
@@ -366,6 +367,7 @@ async def list_building_records_in_bounds(
             Building.longitude <= east,
             Building.latitude >= south,
             Building.latitude <= north,
+            *predicates,
         )
         .order_by(Building.id)
         .limit(limit)

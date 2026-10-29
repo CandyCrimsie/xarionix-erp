@@ -11,6 +11,8 @@ from core.map_domain import MapOperationError
 from dependencies.authorization import require_permission
 from dependencies.company import CurrentCompanyContext
 from dependencies.database import get_session
+from dependencies.map_filters import map_filters
+from schemas.map_workspace import MapFilter
 from schemas.map import (
     MapAddressObjectBoundsResponse,
     MapBuildingFeatureCollection,
@@ -75,6 +77,7 @@ MapManageContext = Annotated[
     ),
 ]
 DatabaseSession = Annotated[AsyncSession, Depends(get_session)]
+MapFilters = Annotated[MapFilter, Depends(map_filters)]
 
 
 async def actor(session, context):
@@ -108,6 +111,7 @@ async def get_map_buildings_endpoint(
     south: Annotated[Decimal, Query(ge=-90, le=90)],
     east: Annotated[Decimal, Query(ge=-180, le=180)],
     north: Annotated[Decimal, Query(ge=-90, le=90)],
+    filters: MapFilters,
 ) -> MapBuildingFeatureCollection:
     if west >= east or south >= north:
         raise HTTPException(
@@ -120,6 +124,8 @@ async def get_map_buildings_endpoint(
     try:
         return await get_map_buildings(
             session,
+            company_id=_.company.id,
+            filters=filters,
             west=west,
             south=south,
             east=east,
@@ -157,6 +163,7 @@ async def get_map_address_object_bounds_endpoint(
 async def list_map_markers_endpoint(
     context: MapReadContext,
     session: DatabaseSession,
+    filters: MapFilters,
     west: Annotated[Decimal | None, Query(ge=-180, le=180)] = None,
     south: Annotated[Decimal | None, Query(ge=-90, le=90)] = None,
     east: Annotated[Decimal | None, Query(ge=-180, le=180)] = None,
@@ -181,6 +188,7 @@ async def list_map_markers_endpoint(
         south=south,
         east=east,
         north=north,
+        filters=filters,
     )
 
 
@@ -258,10 +266,11 @@ async def delete_map_marker_endpoint(
     marker_id: int,
     context: MapReadContext,
     session: DatabaseSession,
+    expected_version: Annotated[int | None, Query(gt=0)] = None,
 ) -> Response:
     try:
         await delete_marker(
-            session, **await actor(session, context), marker_id=marker_id
+            session, **await actor(session, context), marker_id=marker_id, expected_version=expected_version
         )
     except MapMarkerNotFoundError as exc:
         raise HTTPException(
@@ -288,6 +297,7 @@ async def building_marker(building_id: int, context: MapReadContext, session: Da
 
 @router.get("/connections", response_model=list[MapConnectionResponse])
 async def list_connections(context: MapReadContext, session: DatabaseSession,
+    filters: MapFilters,
     west: Annotated[Decimal | None, Query(ge=-180, le=180)] = None,
     south: Annotated[Decimal | None, Query(ge=-90, le=90)] = None,
     east: Annotated[Decimal | None, Query(ge=-180, le=180)] = None,
@@ -301,7 +311,7 @@ async def list_connections(context: MapReadContext, session: DatabaseSession,
         bounds = {"west": west, "south": south, "east": east, "north": north}
     if (endpoint_kind is None) != (endpoint_id is None):
         raise HTTPException(status_code=422, detail="Endpoint kind and ID are required together")
-    return await graph.get_connections(session, **await actor(session, context), bounds=bounds, endpoint_kind=endpoint_kind, endpoint_id=endpoint_id)
+    return await graph.get_connections(session, **await actor(session, context), bounds=bounds, endpoint_kind=endpoint_kind, endpoint_id=endpoint_id, filters=filters)
 
 
 @router.post("/connections", response_model=MapConnectionResponse, status_code=201)
@@ -340,8 +350,8 @@ async def detach_route_object(connection_id: int, marker_id: int, data: MapRoute
 
 
 @router.delete("/connections/{connection_id}", status_code=204)
-async def remove_connection(connection_id: int, context: MapReadContext, session: DatabaseSession):
-    await graph.delete_connection(session, **await actor(session, context), connection_id=connection_id)
+async def remove_connection(connection_id: int, context: MapReadContext, session: DatabaseSession, expected_version: Annotated[int | None, Query(gt=0)] = None):
+    await graph.delete_connection(session, **await actor(session, context), connection_id=connection_id, expected_version=expected_version)
     return Response(status_code=204)
 
 

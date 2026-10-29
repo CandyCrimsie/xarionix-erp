@@ -26,8 +26,8 @@ def marker_records_query():
 async def list_map_markers(session: AsyncSession, *, company_id: int, user_id: int,
                            west: Decimal | None = None, south: Decimal | None = None,
                            east: Decimal | None = None, north: Decimal | None = None,
-                           limit: int = 5001):
-    query = marker_records_query().where(*visible_to(MapMarker, company_id, user_id))
+                           limit: int = 5001, predicates=()):
+    query = marker_records_query().where(*visible_to(MapMarker, company_id, user_id), *predicates)
     if None not in (west, south, east, north):
         lat, lng = marker_position_columns()
         query = query.where(lng >= west, lng <= east, lat >= south, lat <= north)

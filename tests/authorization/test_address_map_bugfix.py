@@ -15,6 +15,8 @@ from services.map_markers import update_marker
 from test_map_api import marker_building_context, primary_marker, represents_payload
 from test_map_graph_api import cable, point, reader
 
+pytestmark = pytest.mark.usefixtures("clean_test_redis")
+
 
 @pytest.mark.asyncio
 async def test_delete_conflict_lists_real_connections_entrances_locations_without_mutation(db_session, api_client):

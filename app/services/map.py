@@ -73,7 +73,10 @@ async def get_map_buildings(
     south: Decimal,
     east: Decimal,
     north: Decimal,
+    company_id: int | None = None,
+    filters=None,
 ) -> MapBuildingFeatureCollection:
+    from services.map_layers import map_predicates
     records = await list_building_records_in_bounds(
         session,
         west=west,
@@ -81,6 +84,7 @@ async def get_map_buildings(
         east=east,
         north=north,
         limit=config.MAP_MAX_BUILDINGS_PER_VIEWPORT + 1,
+        predicates=await map_predicates(session, company_id=company_id, kind="building", filters=filters),
     )
     if len(records) > config.MAP_MAX_BUILDINGS_PER_VIEWPORT:
         raise MapViewportTooLargeError

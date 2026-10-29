@@ -161,6 +161,8 @@ async def test_operations_keep_rbac_versions_and_server_owned_topology(db_sessio
 async def test_upgrade_preserves_existing_records_and_is_idempotent(db_session,api_client):
     _,_,headers,_,_,line=await route_context(db_session,api_client)
     connection=await db_session.connection()
+    # Reproduce the actual pre-workspace schema, not a hybrid with newer FKs.
+    await connection.execute(text("DROP TABLE map_passports, map_preferences, map_layer_members, map_layers"))
     await connection.execute(text("DROP TABLE map_route_objects"))
     await connection.execute(text("ALTER TABLE map_connections DROP CONSTRAINT ck_map_connections_installation, DROP CONSTRAINT uq_map_connections_company_id, DROP COLUMN installation_methods"))
     await connection.execute(text("ALTER TABLE map_markers DROP CONSTRAINT ck_map_markers_point_type"))
@@ -169,6 +171,8 @@ async def test_upgrade_preserves_existing_records_and_is_idempotent(db_session,a
     assert (await inspect_route_schema(connection))["upgrade_required"] is True
     assert (await upgrade_route_schema(connection))["upgrade_required"] is True
     assert (await upgrade_route_schema(connection))["upgrade_required"] is False
+    from database.map_workspace_upgrade import upgrade_workspace_schema
+    await upgrade_workspace_schema(connection)
     await db_session.commit()
     fresh=(await api_client.get(f"/api/v1/map/connections/{line['id']}",headers=headers)).json()
     assert fresh["geometry"]==line["geometry"] and fresh["installation_methods"]==["unknown"]*3

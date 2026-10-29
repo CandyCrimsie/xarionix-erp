@@ -59,6 +59,9 @@ async def initialize_database() -> None:
         if route_report["upgrade_required"]:
             print("Route schema upgrade:", route_report)
         await connection.run_sync(Base.metadata.create_all)
+        # The standalone upgrader is available for existing installations too.
+        from database.map_workspace_upgrade import upgrade_workspace_schema
+        await upgrade_workspace_schema(connection)
 
 
 async def close_database() -> None:

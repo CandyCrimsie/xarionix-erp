@@ -40,8 +40,10 @@ def marker_response(row, *, user_id: int, can_manage: bool) -> MapMarkerResponse
     return result
 
 
-async def get_markers(session, *, company_id, user_id, can_manage=False, **bounds):
-    rows = await list_map_markers(session, company_id=company_id, user_id=user_id, **bounds)
+async def get_markers(session, *, company_id, user_id, can_manage=False, filters=None, **bounds):
+    from services.map_layers import map_predicates
+    rows = await list_map_markers(session, company_id=company_id, user_id=user_id, **bounds,
+        predicates=await map_predicates(session, company_id=company_id, kind="marker", filters=filters))
     if len(rows) > 5000:
         raise MapOperationError("viewport_too_large", "Слишком много меток. Увеличьте масштаб.", status=422)
     result = [marker_response(row, user_id=user_id, can_manage=can_manage) for row in rows]
@@ -72,7 +74,7 @@ async def _binding_snapshot(session, *, marker, target, occupant, values):
         return {"id": building_id, "address": record.full_address, "position": _position(record.building)} if record else None
     snapshot = {
         "marker": {"id": marker.id, "version": marker.version, "name": marker.name, "building_id": marker.building_id} if marker else None,
-        "previous_building": await house_info(marker.building_id) if marker and marker.building_link_role == "represents" else None,
+        "previous_building": await house_info(marker.building_id) if marker and marker.building_id is not None else None,
         "target_building": await house_info(target.id),
         "previous_marker": {"id": occupant.id, "version": occupant.version, "name": occupant.name} if occupant else None,
         "requested_name": values["name"],
@@ -140,6 +142,7 @@ async def _save_marker(session: AsyncSession, *, company_id, user_id, can_manage
                 raise MapOperationError("visibility_has_connections", "Перед изменением видимости удалите или переназначьте соединения.")
         if values.get("building_position") and (link != "represents" or not can_manage):
             raise MapOperationError("permission_denied", "Изменить расположение общего дома можно только с правом управления адресами.", status=403)
+        rebinding = marker and marker.building_id is not None and building_id is not None and marker.building_id != building_id
         if link == "represents":
             if marker and marker.building_link_role != "represents" and await session.scalar(
                 select(MapConnection.id).where(or_(MapConnection.source_marker_id == marker.id, MapConnection.target_marker_id == marker.id)).limit(1)
@@ -150,7 +153,7 @@ async def _save_marker(session: AsyncSession, *, company_id, user_id, can_manage
                 MapMarker.building_link_role == "represents",
                 MapMarker.id != marker_id if marker_id else True,
             ).with_for_update())
-            moving = marker and marker.building_link_role == "represents" and marker.building_id != building_id
+            moving = rebinding
             if occupant or moving:
                 snapshot, token = await _binding_snapshot(session, marker=marker, target=building, occupant=occupant, values=values)
                 if not hmac.compare_digest(changes.get("binding_confirmation") or "", token):
@@ -167,6 +170,10 @@ async def _save_marker(session: AsyncSession, *, company_id, user_id, can_manage
                 await set_building_position(session, building, **values["building_position"])
             values["latitude"] = values["longitude"] = None
         else:
+            if rebinding:
+                snapshot, token = await _binding_snapshot(session, marker=marker, target=building, occupant=None, values=values)
+                if not hmac.compare_digest(changes.get("binding_confirmation") or "", token):
+                    raise MapOperationError("building_binding_conflict", "Подтвердите старую и новую адресную связь.", snapshot=snapshot, confirmation_token=token)
             if marker and marker.building_link_role == "represents":
                 old = buildings.get(marker.building_id)
                 if "latitude" not in changes and old:
@@ -207,21 +214,25 @@ async def update_marker(session, *, company_id, user_id, can_manage, marker_id, 
     return await _save_marker(session, company_id=company_id, user_id=user_id, can_manage=can_manage, marker_id=marker_id, data=data)
 
 
-async def delete_marker(session, *, company_id, marker_id, user_id, can_manage):
+async def delete_marker(session, *, company_id, marker_id, user_id, can_manage, expected_version=None):
     try:
         await lock_map_company(session, company_id)
         marker = await get_map_marker(session, company_id=company_id, marker_id=marker_id, user_id=user_id)
         if marker is None:
             raise MapMarkerNotFoundError
+        await session.refresh(marker, with_for_update=True)
         require_write(marker, user_id, can_manage)
-        dependencies = list((await session.scalars(select(MapConnection).where(or_(
+        check_version(marker, expected_version)
+        dependency = await session.scalar(select(MapConnection.id).where(or_(
             MapConnection.source_marker_id == marker_id, MapConnection.target_marker_id == marker_id
-        )))).all())
-        if dependencies:
-            raise MapOperationError("endpoint_has_connections", "Сначала удалите или переназначьте присоединённые линии.", connections=[
-                {"id": row.id, "name": row.name, "medium": row.medium, "status": row.status}
-                for row in dependencies if row.company_id == company_id and (row.visibility == "company" or row.owner_user_id == user_id)
-            ])
+        )).limit(1))
+        if dependency:
+            from services.address_dependencies import deletion_dependencies
+            detail = await deletion_dependencies(session, "marker", marker_id, company_id=company_id, user_id=user_id)
+            # Keep the established code/legacy examples, add the shared dialog contract.
+            examples = next((group["items"] for group in detail["dependencies"] if group["type"] == "map_connection"), [])
+            raise MapOperationError("endpoint_has_connections", detail["message"], object=detail["object"],
+                dependencies=detail["dependencies"], connections=examples)
         await session.delete(marker)
         await session.commit()
     except Exception:

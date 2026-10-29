@@ -112,8 +112,10 @@ def connection_list_query(*, company_id, user_id, bounds=None, endpoint_kind=Non
     return query.order_by(MapConnection.id).limit(2001)
 
 
-async def get_connections(session, *, company_id, user_id, can_manage, bounds=None, endpoint_kind=None, endpoint_id=None):
+async def get_connections(session, *, company_id, user_id, can_manage, bounds=None, endpoint_kind=None, endpoint_id=None, filters=None):
+    from services.map_layers import map_predicates
     query = connection_list_query(company_id=company_id, user_id=user_id, bounds=bounds, endpoint_kind=endpoint_kind, endpoint_id=endpoint_id)
+    query = query.where(*await map_predicates(session, company_id=company_id, kind="connection", filters=filters))
     rows = (await session.execute(query)).all()
     if len(rows) > 2000:
         raise MapOperationError("viewport_too_large", "Слишком много соединений. Увеличьте масштаб.", status=422)
@@ -213,7 +215,7 @@ async def save_connection(session, *, company_id, user_id, can_manage, data, con
         raise
 
 
-async def delete_connection(session, *, company_id, user_id, can_manage, connection_id):
+async def delete_connection(session, *, company_id, user_id, can_manage, connection_id, expected_version=None):
     try:
         await lock_map_company(session, company_id)
         entity = await session.scalar(select(MapConnection).where(
@@ -222,10 +224,14 @@ async def delete_connection(session, *, company_id, user_id, can_manage, connect
         if entity is None:
             raise MapOperationError("not_found", "Соединение не найдено", status=404)
         require_write(entity, user_id, can_manage)
-        objects = await route_object_rows(session, [entity.id])
-        if objects:
-            raise MapOperationError("route_has_objects", "Сначала отвяжите объекты вдоль трассы. Они останутся на карте.",
-                objects=[{"marker_id": marker.id, "name": marker.name} for _, marker in objects])
+        check_version(entity, expected_version)
+        from models.map_route_objects import MapRouteObject
+        if await session.scalar(select(MapRouteObject.marker_id).where(MapRouteObject.connection_id == entity.id).limit(1)):
+            from services.address_dependencies import deletion_dependencies
+            detail = await deletion_dependencies(session, "connection", entity.id, company_id=company_id, user_id=user_id)
+            examples = next((group["items"] for group in detail["dependencies"] if group["type"] == "route_object"), [])
+            raise MapOperationError("route_has_objects", detail["message"], object=detail["object"], dependencies=detail["dependencies"],
+                objects=[{"marker_id": item["id"], "name": item["name"]} for item in examples])
         await session.delete(entity)
         await session.commit()
     except Exception:
@@ -314,6 +320,8 @@ async def split_connection(session, *, company_id, user_id, can_manage, connecti
             attachment.geometry_token = geometry_token(part)
             locate_anchor(part, anchored_marker, attachment)
         await session.flush()
+        from services.map_layers import inherit_route_layers
+        await inherit_route_layers(session, company_id=company_id, connection_id=current.id, marker_id=marker.id, tail_id=tail.id)
         # Build responses before the only commit, still holding every lock.
         result = MapConnectionSplitResponse(
             marker=await get_marker(session, company_id=company_id, user_id=user_id, can_manage=can_manage, marker_id=marker.id),
@@ -355,6 +363,8 @@ async def place_route_object(session, *, company_id, user_id, can_manage, connec
         session.add(MapRouteObject(company_id=company_id, marker_id=marker.id, connection_id=current.id,
             segment_index=index, fraction=fraction, geometry_token=geometry_token(points)))
         await session.flush()
+        from services.map_layers import inherit_route_layers
+        await inherit_route_layers(session, company_id=company_id, connection_id=current.id, marker_id=marker.id)
         result = MapRouteObjectResponse(marker=await get_marker(session, company_id=company_id, user_id=user_id, can_manage=can_manage, marker_id=marker.id),
             connection=await get_connection(session, company_id=company_id, user_id=user_id, can_manage=can_manage, connection_id=current.id))
         await session.commit()

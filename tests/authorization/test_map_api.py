@@ -23,6 +23,10 @@ from services import addresses as address_service
 from services.address_types import sync_system_address_types
 from services.auth import register_user
 
+# The DB fixture recreates numeric IDs; cached permissions/sessions must not
+# survive between otherwise independent map API regression scenarios.
+pytestmark = pytest.mark.usefixtures("clean_test_redis")
+
 
 def company_headers(token: str, company_id: int) -> dict[str, str]:
     return {

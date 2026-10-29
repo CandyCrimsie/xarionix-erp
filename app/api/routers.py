@@ -17,6 +17,7 @@ from .v1 import (
     invitations,
     addresses,
     map,
+    map_workspace,
 )
 
 router = APIRouter()
@@ -37,3 +38,4 @@ router.include_router(setup.router)
 router.include_router(invitations.router)
 router.include_router(addresses.router)
 router.include_router(map.router)
+router.include_router(map_workspace.router)
