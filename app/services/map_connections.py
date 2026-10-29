@@ -391,6 +391,37 @@ async def set_installation_boundary(session, *, company_id, user_id, can_manage,
         raise
 
 
+async def edit_installation_boundary(session, *, company_id, user_id, can_manage, connection_id, vertex_index, data):
+    from core.map_routes import edit_boundary
+    try:
+        current, snapshot = await _locked_route(session, company_id=company_id, user_id=user_id, can_manage=can_manage, connection_id=connection_id, data=data)
+        options = {}
+        if data.operation == "move":
+            points, position, *_ = _checked_route_point(snapshot, data)
+            # Reuse an exact existing bend, even for legacy vertices with more
+            # than seven decimal places. Rounding must not insert a sliver.
+            if data.fraction == 0:
+                position = points[data.segment_index]
+            elif data.fraction == 1:
+                position = points[data.segment_index + 1]
+            options = dict(position=position, index=data.segment_index, fraction=data.fraction)
+        elif data.operation == "set":
+            options = dict(method=data.installation_after)
+        else:
+            options = dict(keep=data.keep)
+        points, methods = edit_boundary(snapshot.geometry["coordinates"], snapshot.installation_methods, vertex_index, data.operation, **options)
+        await reanchor_route(session, current, points)
+        current.vertices, current.installation_methods = points[1:-1], methods
+        current.version += 1
+        await session.flush()
+        result = await get_connection(session, company_id=company_id, user_id=user_id, can_manage=can_manage, connection_id=connection_id)
+        await session.commit()
+        return result
+    except Exception:
+        await session.rollback()
+        raise
+
+
 async def detach_route_object(session, *, company_id, user_id, can_manage, connection_id, marker_id, data):
     from models.map_route_objects import MapRouteObject
     from schemas.map_connections import MapRouteObjectResponse

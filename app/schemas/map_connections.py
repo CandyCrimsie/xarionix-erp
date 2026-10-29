@@ -113,6 +113,23 @@ class MapRouteObjectDetach(BaseModel):
     expected_geometry_token: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class BoundarySet(MapRouteObjectDetach):
+    operation: Literal["set"]
+    installation_after: InstallationMethod
+
+
+class BoundaryRemove(MapRouteObjectDetach):
+    operation: Literal["remove"]
+    keep: Literal["previous", "next"]
+
+
+class BoundaryMove(RoutePointRequest):
+    operation: Literal["move"]
+
+
+MapBoundaryEdit = Annotated[BoundarySet | BoundaryRemove | BoundaryMove, Field(discriminator="operation")]
+
+
 class EndpointResponse(BaseModel):
     kind: Literal["building", "marker"]
     id: int

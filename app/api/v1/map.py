@@ -22,7 +22,7 @@ from schemas.map_markers import MapMarkerCreate, MapMarkerResponse, MapMarkerUpd
 from schemas.map_connections import MapConnectionCreate, MapConnectionUpdate, MapConnectionResponse, MapStylePresetCreate, MapStylePresetUpdate, MapStylePresetResponse
 from services import map_connections as graph
 from schemas.map_connections import MapConnectionSplit, MapConnectionSplitResponse
-from schemas.map_connections import MapConnectionPlace, MapRouteObjectResponse, MapInstallationBoundary, MapRouteObjectDetach
+from schemas.map_connections import MapConnectionPlace, MapRouteObjectResponse, MapInstallationBoundary, MapRouteObjectDetach, MapBoundaryEdit
 from services.authorization import AuthorizationService
 from services.map import (
     MapAddressObjectNotFoundError,
@@ -342,6 +342,11 @@ async def place_route_object(connection_id: int, data: MapConnectionPlace, conte
 @router.post("/connections/{connection_id}/installation-boundaries", response_model=MapConnectionResponse)
 async def installation_boundary(connection_id: int, data: MapInstallationBoundary, context: MapReadContext, session: DatabaseSession):
     return await graph.set_installation_boundary(session, **await actor(session, context), data=data, connection_id=connection_id)
+
+
+@router.patch("/connections/{connection_id}/installation-boundaries/{vertex_index}", response_model=MapConnectionResponse)
+async def edit_installation_boundary(connection_id: int, vertex_index: int, data: MapBoundaryEdit, context: MapReadContext, session: DatabaseSession):
+    return await graph.edit_installation_boundary(session, **await actor(session, context), data=data, connection_id=connection_id, vertex_index=vertex_index)
 
 
 @router.post("/connections/{connection_id}/route-objects/{marker_id}/detach", response_model=MapRouteObjectResponse)

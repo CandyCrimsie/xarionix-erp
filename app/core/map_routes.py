@@ -83,3 +83,47 @@ def offset_segment(points, offset):
             return index, max(0., min(1., offset / length))
         offset -= length
     raise MapOperationError("degenerate_route", "Трасса не содержит ненулевых сегментов.", status=422)
+
+
+def edit_boundary(points, methods, vertex, operation, *, position=None, index=None, fraction=None, method=None, keep=None):
+    """Boundaries are changes between edge attributes, never physical nodes.
+
+    Retain every old corner, including the former boundary. Moving inserts at
+    most one collinear vertex; deleting only merges attributes, not geometry.
+    """
+    from services.map_connections import route_length
+    boundaries = [i for i in range(1, len(methods)) if methods[i - 1] != methods[i]]
+    if vertex not in boundaries:
+        raise MapOperationError("boundary_not_found", "Граница прокладки отсутствует. Обновите трассу.", status=409)
+    previous = max((i for i in boundaries if i < vertex), default=0)
+    following = min((i for i in boundaries if i > vertex), default=len(methods))
+    before, after = methods[vertex - 1], methods[vertex]
+    points, methods = list(points), list(methods)
+    if operation == "set":
+        methods[vertex:following] = [method] * (following - vertex)
+    elif operation == "remove":
+        value = before if keep == "previous" else after
+        methods[previous:following] = [value] * (following - previous)
+    else:
+        offset = path_offset(points, index, fraction)
+        if not path_offset(points, previous, 0) < offset < path_offset(points, following - 1, 1):
+            raise MapOperationError("boundary_order", "Граница не может пересекать соседние границы.", status=422)
+        inserted = False
+        if position == points[index]:
+            target = index
+        elif position == points[index + 1]:
+            target = index + 1
+        else:
+            target, inserted = index + 1, True
+            points.insert(target, position)
+            methods.insert(target, methods[index])
+        if inserted:
+            previous += int(target <= previous)
+            following += int(target <= following)
+        if route_length(points[previous:target + 1]) < 1 or route_length(points[target:following + 1]) < 1:
+            raise MapOperationError("boundary_too_close", "Между границами должен оставаться участок не короче 1 м.", status=422)
+        if len(points) > 500:
+            raise MapOperationError("vertex_limit", "Допускается не более 498 промежуточных вершин.", status=422)
+        methods[previous:target] = [before] * (target - previous)
+        methods[target:following] = [after] * (following - target)
+    return points, methods
