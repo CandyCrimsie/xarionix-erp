@@ -78,10 +78,21 @@ async def lifespan(
 
     await clear_authorization_cache()
 
+    # Separate, TLS-verifying client. No cookies, redirects, env proxy or secret logs.
+    import httpx
+    from core.config import config
+    from services.platform_identity import PlatformProvider
+    platform_client = httpx.AsyncClient(
+        timeout=5, trust_env=False, follow_redirects=False,
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    ) if config.PLATFORM_OIDC_ENABLED else None
+    app.state.platform_provider = PlatformProvider(platform_client) if platform_client else None
     try:
         yield
 
     finally:
+        if platform_client is not None:
+            await platform_client.aclose()
         print(
             "Закрываю Redis..."
         )

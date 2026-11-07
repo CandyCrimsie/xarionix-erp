@@ -22,6 +22,7 @@ from models import (
     map_route_objects,
     map_style_presets,
     map_workspace,
+    platform_bindings,
 )
 
 __all__ = [
@@ -48,4 +49,5 @@ __all__ = [
     "map_route_objects",
     "map_style_presets",
     "map_workspace",
+    "platform_bindings",
 ]

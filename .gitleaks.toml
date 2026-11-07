@@ -1,0 +1,11 @@
+title = "Xarionix ERP secret scanning"
+[extend]
+useDefault = true
+
+# Public synthetic "test-map-secret!" used only by isolated offline tests.
+# No rule/file-wide exemption; production signing values remain scanned.
+[[allowlists]]
+description = "Exact public offline tile signature fixture in CI and proxy test"
+condition = "AND"
+paths = ['''(^|/)\.gitlab-ci\.yml$''', '''(^|/)infrastructure/map-proxy/tests/run-proxy-tests\.sh$''']
+regexes = ['''^dGVzdC1tYXAtc2VjcmV0IQ==$''']

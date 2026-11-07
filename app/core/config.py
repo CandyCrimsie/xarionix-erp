@@ -60,6 +60,26 @@ class Config(BaseSettings):
         le=64,
     )
 
+    # Opt-in SSO compatibility; numeric ERP IDs and ERP RBAC remain authoritative.
+    PLATFORM_OIDC_ENABLED: bool = False
+    PLATFORM_DEVELOPMENT: bool = False
+    PLATFORM_CORE_API: str = ""
+    PLATFORM_OIDC_ISSUER: str = ""
+    PLATFORM_OIDC_AUDIENCE: str = "xarionix-erp"
+    PLATFORM_OIDC_CLIENT_ID: str = ""
+
+    @model_validator(mode="after")
+    def validate_platform(self) -> "Config":
+        if self.PLATFORM_OIDC_ENABLED:
+            from core.platform_urls import validate_platform_url
+            for url in (self.PLATFORM_CORE_API, self.PLATFORM_OIDC_ISSUER):
+                validate_platform_url(url, self.PLATFORM_DEVELOPMENT)
+            if not self.PLATFORM_CORE_API.endswith("/api/v1"):
+                raise ValueError("PLATFORM_CORE_API must end in /api/v1")
+            if not self.PLATFORM_OIDC_CLIENT_ID or self.PLATFORM_OIDC_AUDIENCE != "xarionix-erp":
+                raise ValueError("Explicit browser client and dedicated ERP audience required")
+        return self
+
     MAP_TILES_ENABLED: bool = False
     MAP_TILES_SIGNING_SECRET: str = Field(
         default="",
@@ -155,7 +175,8 @@ class Config(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra='allow'
+        extra='allow',
+        hide_input_in_errors=True
     )
 
 config = Config()

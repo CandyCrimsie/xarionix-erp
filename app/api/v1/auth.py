@@ -193,6 +193,9 @@ async def logout(
         Depends(get_current_auth),
     ],
 ) -> None:
+    if auth.platform is not None:
+        raise HTTPException(409, "Use platform OIDC session management")
+
     await delete_session(
         user_id=auth.user.id,
         session_id=auth.session_id,
@@ -212,6 +215,9 @@ async def logout_all(
         Depends(get_current_auth),
     ],
 ) -> None:
+    if auth.platform is not None:
+        raise HTTPException(409, "Use platform OIDC session management")
+
     await delete_all_user_sessions(
         auth.user.id
     )
@@ -230,6 +236,9 @@ async def remove_session(
         Depends(get_current_auth),
     ],
 ) -> None:
+    if auth.platform is not None:
+        raise HTTPException(409, "Use platform OIDC session management")
+
     try:
         await delete_user_session(
             user_id=auth.user.id,
@@ -241,3 +250,33 @@ async def remove_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found",
         )
+
+@router.get("/platform-context")
+async def platform_context(
+    auth: Annotated[CurrentAuth, Depends(get_current_auth)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    from models.company import Company
+    from models.company_memberships import CompanyMembership
+    from sqlalchemy import select
+    from schemas.company import CompanyResponse
+    from services.authorization import AuthorizationService
+    if auth.platform is None:
+        raise HTTPException(403, "Platform identity required")
+    identity = auth.platform
+    company = await session.get(Company, identity.company_id)
+    member = await session.scalar(select(CompanyMembership).where(
+        CompanyMembership.company_id == identity.company_id,
+        CompanyMembership.user_id == auth.user.id,
+    ))
+    effective = await AuthorizationService(session).get_effective_permissions(
+        company_id=identity.company_id, company_membership_id=member.id,
+    )
+    return {
+        "core_user_id": identity.core_user_id,
+        "core_company_id": identity.core_company_id,
+        "user": UserResponse.model_validate(auth.user),
+        "company": CompanyResponse.model_validate(company),
+        "permissions": sorted(effective),
+        "scopes": effective,
+    }

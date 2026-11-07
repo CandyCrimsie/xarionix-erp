@@ -32,7 +32,7 @@ from repositories.company_memberships import (
 @dataclass(slots=True, frozen=True)
 class CurrentCompanyContext:
     user: User
-    session_id: UUID
+    session_id: UUID | None
 
     company: Company
     membership: CompanyMembership
@@ -62,6 +62,9 @@ async def get_current_company_context(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="X-Company-Id header is required",
         )
+
+    if auth.platform is not None and header_company_id != auth.platform.company_id:
+        raise HTTPException(403, "platform_company_mismatch")
 
     membership = await get_company_membership_by_user(
         session,

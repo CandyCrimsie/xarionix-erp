@@ -6,7 +6,7 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dependencies.auth import get_current_user
+from dependencies.auth import CurrentAuth, get_current_auth
 from dependencies.database import get_session
 
 from models.users import User
@@ -50,19 +50,16 @@ async def get_my_profile(context: CurrentCompany) -> MyProfileResponse:
     response_model=list[CompanyResponse],
 )
 async def get_my_companies(
-    user: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
+    auth: Annotated[CurrentAuth, Depends(get_current_auth)],
     session: Annotated[
         AsyncSession,
         Depends(get_session),
     ],
 ) -> list[CompanyResponse]:
-    return await list_available_companies_for_user(
-        session,
-        user.id,
-    )
+    companies = await list_available_companies_for_user(session, auth.user.id)
+    if auth.platform is not None:
+        return [company for company in companies if company.id == auth.platform.company_id]
+    return companies
 
 
 @router.get(
